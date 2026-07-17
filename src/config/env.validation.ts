@@ -26,6 +26,14 @@ export const envValidationSchema = Joi.object({
   MEDIA_STORAGE_PROVIDER: Joi.string().valid('local', 's3').default('local'),
 
   ZALO_AUTH_MODE: Joi.string().valid('mock', 'real').default('mock'),
+  // Zalo Mini App "App Secret Key" — required to call Zalo's Graph API
+  // (graph.zalo.me) for real access-token verification. Only meaningful
+  // when ZALO_AUTH_MODE=real; irrelevant (and left unset) for mock/local dev.
+  ZALO_APP_SECRET: Joi.string().min(1).when('ZALO_AUTH_MODE', {
+    is: 'real',
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
 
   // tlds: { allow: false } — SEED_ADMIN_EMAIL intentionally uses a .local
   // dev-only domain (per spec's own .env.example), which isn't a real IANA

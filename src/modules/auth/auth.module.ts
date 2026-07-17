@@ -10,6 +10,7 @@ import { UsersModule } from '../users/users.module';
 import { AuthController } from './controllers/auth.controller';
 import { JwtAccessGuard } from './guards/jwt-access.guard';
 import { MockZaloAuthProvider } from './providers/mock-zalo-auth.provider';
+import { RealZaloAuthProvider } from './providers/real-zalo-auth.provider';
 import { ZALO_AUTH_PROVIDER } from './providers/zalo-auth.token';
 import { AuthService } from './services/auth.service';
 import { TokenService } from './services/token.service';
@@ -34,7 +35,7 @@ import { JwtAccessStrategy } from './strategies/jwt-access.strategy';
         if (authConfig.zaloAuthMode === 'mock') {
           return new MockZaloAuthProvider();
         }
-        throw new Error('ZALO_AUTH_MODE=real chưa được triển khai ở Phase 1');
+        return new RealZaloAuthProvider(configService);
       },
       inject: [ConfigService],
     },
