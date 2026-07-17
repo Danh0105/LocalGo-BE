@@ -1,0 +1,15 @@
+node_modules
+dist
+generated
+coverage
+uploads
+.git
+.env
+.env.test
+.env.*.local
+*.md
+docs
+test
+.vscode
+.idea
+npm-debug.log*

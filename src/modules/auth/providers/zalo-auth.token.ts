@@ -1,0 +1,1 @@
+export const ZALO_AUTH_PROVIDER = Symbol('ZALO_AUTH_PROVIDER');

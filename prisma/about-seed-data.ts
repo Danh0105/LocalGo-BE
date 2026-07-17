@@ -1,0 +1,66 @@
+export const ABOUT_INITIAL_SNAPSHOT = {
+  title: 'Giới thiệu',
+  hero: {
+    mediaId: null,
+    imageAlt: 'Toàn cảnh xã Truông Mít',
+  },
+  overview: {
+    title: 'Tổng quan',
+    paragraphs: [
+      'Xã Truông Mít nằm ở phía nam huyện Dương Minh Châu, tỉnh Tây Ninh, cách trung tâm huyện khoảng 15km. Với vị trí tiếp giáp kênh Đông hồ Dầu Tiếng, xã có lợi thế lớn về nguồn nước tưới phục vụ sản xuất nông nghiệp.',
+      'Người dân Truông Mít cần cù, mến khách, giàu truyền thống cách mạng. Những năm gần đây, xã tập trung phát triển nông nghiệp công nghệ cao, gìn giữ làng nghề truyền thống và từng bước khai thác tiềm năng du lịch cộng đồng.',
+    ],
+  },
+  statistics: [
+    { id: '00000000-0000-4000-8000-000000000101', value: '4.870', unit: 'ha', label: 'Diện tích tự nhiên', sortOrder: 0, isActive: true },
+    { id: '00000000-0000-4000-8000-000000000102', value: '21.500', unit: 'người', label: 'Dân số', sortOrder: 1, isActive: true },
+    { id: '00000000-0000-4000-8000-000000000103', value: '7', unit: 'ấp', label: 'Đơn vị hành chính', sortOrder: 2, isActive: true },
+    { id: '00000000-0000-4000-8000-000000000104', value: '1979', unit: '', label: 'Năm thành lập', sortOrder: 3, isActive: true },
+  ],
+  highlightsSectionTitle: 'Điểm nổi bật',
+  highlights: [
+    {
+      id: '00000000-0000-4000-8000-000000000201',
+      title: 'Văn hóa - Tín ngưỡng',
+      description: 'Hệ thống đình, chùa, miếu lâu đời gắn liền với đời sống tâm linh của người dân, tiêu biểu là đình Truông Mít với lễ Kỳ Yên hằng năm.',
+      mediaId: null,
+      imageAlt: 'Văn hóa và tín ngưỡng địa phương',
+      sortOrder: 0,
+      isActive: true,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000202',
+      title: 'Nông nghiệp',
+      description: 'Vùng chuyên canh mía, mì và cao su lớn của huyện; đang chuyển đổi mạnh sang cây ăn trái giá trị cao như sầu riêng, mãng cầu.',
+      mediaId: null,
+      imageAlt: 'Nông nghiệp địa phương',
+      sortOrder: 1,
+      isActive: true,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000203',
+      title: 'Làng nghề truyền thống',
+      description: 'Nghề đan lát, làm bánh tráng phơi sương được gìn giữ qua nhiều thế hệ, tạo việc làm cho hàng trăm lao động địa phương.',
+      mediaId: null,
+      imageAlt: 'Làng nghề truyền thống',
+      sortOrder: 2,
+      isActive: true,
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000204',
+      title: 'Lễ hội',
+      description: 'Các lễ hội dân gian như đua thuyền, hội xuân thu hút đông đảo du khách, góp phần quảng bá hình ảnh quê hương.',
+      mediaId: null,
+      imageAlt: 'Lễ hội địa phương',
+      sortOrder: 3,
+      isActive: true,
+    },
+  ],
+  milestonesSectionTitle: 'Dấu mốc phát triển',
+  milestones: [
+    { id: '00000000-0000-4000-8000-000000000301', year: '1979', title: '', description: 'Thành lập xã Truông Mít trên cơ sở tách từ xã Cầu Khởi, huyện Dương Minh Châu.', sortOrder: 0, isActive: true },
+    { id: '00000000-0000-4000-8000-000000000302', year: '2015', title: '', description: 'Được công nhận xã đạt chuẩn Nông thôn mới.', sortOrder: 1, isActive: true },
+    { id: '00000000-0000-4000-8000-000000000303', year: '2021', title: '', description: 'Đạt chuẩn Nông thôn mới nâng cao, hạ tầng giao thông nông thôn được nhựa hóa trên 90%.', sortOrder: 2, isActive: true },
+    { id: '00000000-0000-4000-8000-000000000304', year: '2025', title: '', description: 'Ra mắt Mini App LocalGo, đẩy mạnh chuyển đổi số trong quảng bá du lịch và nông sản địa phương.', sortOrder: 3, isActive: true },
+  ],
+};

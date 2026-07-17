@@ -1,0 +1,1028 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Enums ----------
+
+enum UserRole {
+  USER
+  BUSINESS
+  MODERATOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  PENDING
+}
+
+enum SessionRevokeReason {
+  LOGOUT
+  REUSE_DETECTED
+  ADMIN_REVOKED
+  PASSWORD_CHANGE
+}
+
+enum MediaStorageProvider {
+  LOCAL
+  S3
+}
+
+enum MediaResourceType {
+  TRADE_POST
+  TRADE_REVIEW
+  USER_AVATAR
+  BUSINESS_APPLICATION
+  ABOUT
+  TEMPLE
+  SPECIALTY
+  HISTORICAL_SITE
+  AGRICULTURE
+  OCOP
+  CRAFT_VILLAGE
+  CUISINE
+  FESTIVAL
+  EXPERIENCE_TOUR
+  FEEDBACK_CHANNEL
+  MAP_PLACE
+  CONTACT
+  NEWS_ARTICLE
+}
+
+enum TempleType {
+  DINH
+  CHUA
+  MIEU
+}
+
+enum SpecialtyCategory {
+  MON_AN
+  TRAI_CAY
+  QUA_MANG_VE
+}
+
+enum HistoricalSiteRank {
+  CAP_QUOC_GIA
+  CAP_TINH
+  CHUA_XEP_HANG
+}
+
+enum AgricultureCategory {
+  CAY_TRONG_CHU_LUC
+  CHAN_NUOI
+  THUY_LOI
+  MO_HINH_SAN_XUAT
+}
+
+enum OcopCategory {
+  THUC_PHAM
+  DO_UONG
+  NONG_SAN_TUOI
+  SAN_PHAM_CHE_BIEN
+}
+
+enum OcopRating {
+  THREE
+  FOUR
+  FIVE
+}
+
+enum CraftVillageCategory {
+  THU_CONG_TRUYEN_THONG
+  CHE_BIEN_NONG_SAN
+  DICH_VU_TRAI_NGHIEM
+  SAN_PHAM_GIA_DINH
+}
+
+enum CuisineCategory {
+  MON_NUOC
+  MON_NUONG
+  MON_CUON
+  AN_VAT
+  MON_CHAY
+}
+
+enum FestivalCategory {
+  LE_TRUYEN_THONG
+  VAN_HOA_CONG_DONG
+  THE_THAO_VUI_CHOI
+  SU_KIEN_NONG_SAN
+}
+
+enum ExperienceTourCategory {
+  NUA_NGAY
+  MOT_NGAY
+  GIA_DINH
+  HOC_SINH
+  NONG_NGHIEP
+}
+
+enum FeedbackChannelCategory {
+  GOP_Y_CHUNG
+  PHAN_ANH_HA_TANG
+  DICH_VU_CONG
+  DU_LICH
+  MINI_APP
+}
+
+enum FeedbackTicketStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum MapPlaceCategory {
+  HANH_CHINH
+  DU_LICH
+  DI_TICH
+  AM_THUC
+  DICH_VU
+}
+
+enum ContactCategory {
+  HANH_CHINH
+  KHAN_CAP
+  DU_LICH
+  NONG_NGHIEP
+  PHAN_ANH
+}
+
+enum NewsCategory {
+  THONG_BAO
+  HOAT_DONG_XA
+  DU_LICH
+  NONG_NGHIEP
+  CHUYEN_DOI_SO
+}
+
+enum BusinessApplicantType {
+  INDIVIDUAL
+  ORGANIZATION
+}
+
+enum BusinessApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum BusinessDocumentType {
+  IDENTITY_FRONT
+  IDENTITY_BACK
+  BUSINESS_LICENSE
+  TAX_DOCUMENT
+  OTHER
+}
+
+enum TradePostCategory {
+  PRODUCT
+  SERVICE
+  BUY_REQUEST
+  PROMOTION
+}
+
+enum TradePostPriceType {
+  FIXED
+  NEGOTIABLE
+  CONTACT
+}
+
+enum TradePostStatus {
+  DRAFT
+  PENDING
+  PUBLISHED
+  HIDDEN
+  REJECTED
+  EXPIRED
+  ARCHIVED
+}
+
+enum TradeReviewStatus {
+  PENDING
+  PUBLISHED
+  HIDDEN
+}
+
+// ---------- Core / Auth ----------
+
+model User {
+  id           String     @id @default(uuid())
+  zaloId       String?    @unique
+  phone        String?    @unique
+  email        String?    @unique
+  displayName  String
+  avatarUrl    String?
+  passwordHash String?
+  role         UserRole   @default(USER)
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  authSessions                  AuthSession[]
+  tradePostsOwned               TradePost[]           @relation("TradePostOwner")
+  tradePostsApproved            TradePost[]           @relation("TradePostApprover")
+  tradeReviews                  TradeReview[]
+  mediaUploads                  Media[]
+  auditLogs                     AuditLog[]
+  businessApplicationsSubmitted BusinessApplication[] @relation("BusinessApplicationSubmitter")
+  businessApplicationsReviewed  BusinessApplication[] @relation("BusinessApplicationReviewer")
+  businessApplicationAccount    BusinessApplication?  @relation("BusinessApplicationAccount")
+  aboutPagesCreated             AboutPage[]           @relation("AboutPageCreator")
+  aboutPagesUpdated             AboutPage[]           @relation("AboutPageUpdater")
+  aboutPagesPublished           AboutPage[]           @relation("AboutPagePublisher")
+  aboutRevisionsPublished       AboutRevision[]       @relation("AboutRevisionPublisher")
+  templesCreated                Temple[]              @relation("TempleCreator")
+  templesUpdated                Temple[]              @relation("TempleUpdater")
+  specialtiesCreated            Specialty[]           @relation("SpecialtyCreator")
+  specialtiesUpdated            Specialty[]           @relation("SpecialtyUpdater")
+  historicalSitesCreated        HistoricalSite[]      @relation("HistoricalSiteCreator")
+  historicalSitesUpdated        HistoricalSite[]      @relation("HistoricalSiteUpdater")
+  agricultureItemsCreated       AgricultureItem[]     @relation("AgricultureItemCreator")
+  agricultureItemsUpdated       AgricultureItem[]     @relation("AgricultureItemUpdater")
+  ocopProductsCreated           OcopProduct[]         @relation("OcopProductCreator")
+  ocopProductsUpdated           OcopProduct[]         @relation("OcopProductUpdater")
+  craftVillagesCreated          CraftVillage[]        @relation("CraftVillageCreator")
+  craftVillagesUpdated          CraftVillage[]        @relation("CraftVillageUpdater")
+  cuisineItemsCreated           CuisineItem[]         @relation("CuisineItemCreator")
+  cuisineItemsUpdated           CuisineItem[]         @relation("CuisineItemUpdater")
+  festivalsCreated              Festival[]            @relation("FestivalCreator")
+  festivalsUpdated              Festival[]            @relation("FestivalUpdater")
+  experienceToursCreated        ExperienceTour[]      @relation("ExperienceTourCreator")
+  experienceToursUpdated        ExperienceTour[]      @relation("ExperienceTourUpdater")
+  feedbackChannelsCreated       FeedbackChannel[]     @relation("FeedbackChannelCreator")
+  feedbackChannelsUpdated       FeedbackChannel[]     @relation("FeedbackChannelUpdater")
+  feedbackTicketsHandled        FeedbackTicket[]      @relation("FeedbackTicketHandler")
+  mapPlacesCreated              MapPlace[]            @relation("MapPlaceCreator")
+  mapPlacesUpdated              MapPlace[]            @relation("MapPlaceUpdater")
+  contactsCreated               Contact[]             @relation("ContactCreator")
+  contactsUpdated               Contact[]             @relation("ContactUpdater")
+  newsArticlesCreated           NewsArticle[]         @relation("NewsArticleCreator")
+  newsArticlesUpdated           NewsArticle[]         @relation("NewsArticleUpdater")
+
+  @@index([role])
+}
+
+// Refresh-token rotation with reuse detection: one row per issuance,
+// chained via familyId. Presenting an already-replaced token means the
+// token was stolen/replayed -> revoke the whole family.
+model AuthSession {
+  id                String               @id @default(uuid())
+  familyId          String
+  userId            String
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash  String
+  userAgent         String?
+  ipAddress         String?
+  issuedAt          DateTime             @default(now())
+  expiresAt         DateTime
+  replacedAt        DateTime?
+  replacedByTokenId String?              @unique
+  replacedBy        AuthSession?         @relation("SessionRotation", fields: [replacedByTokenId], references: [id])
+  rotatedFrom       AuthSession?         @relation("SessionRotation")
+  revokedAt         DateTime?
+  revokedReason     SessionRevokeReason?
+  createdAt         DateTime             @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+}
+
+// ---------- Shared taxonomy infra (used by future content domains; not wired to TradePost) ----------
+
+model Category {
+  id          String     @id @default(uuid())
+  domain      String
+  slug        String
+  name        String
+  description String?
+  icon        String?
+  parentId    String?
+  parent      Category?  @relation("CategoryParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryParent")
+  sortOrder   Int        @default(0)
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+
+  @@unique([domain, slug])
+  @@index([domain, isActive, sortOrder])
+}
+
+// ---------- Media ----------
+
+model Media {
+  id              String               @id @default(uuid())
+  ownerId         String
+  owner           User                 @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  storageProvider MediaStorageProvider @default(LOCAL)
+  storageKey      String               @unique
+  originalUrl     String
+  thumbnailUrl    String?
+  mimeType        String
+  size            Int
+  width           Int?
+  height          Int?
+  checksum        String
+  resourceType    MediaResourceType?
+  resourceId      String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  deletedAt       DateTime?
+
+  tradePostImages              TradePostImage[]
+  tradeReviewImages            TradeReviewImage[]
+  businessApplicationDocuments BusinessApplicationDocument[]
+  temples                      Temple[]
+  specialties                  Specialty[]
+  historicalSites              HistoricalSite[]
+  agricultureItems             AgricultureItem[]
+  ocopProducts                 OcopProduct[]
+  craftVillages                CraftVillage[]
+  cuisineItems                 CuisineItem[]
+  festivals                    Festival[]
+  experienceTours              ExperienceTour[]
+  feedbackChannels             FeedbackChannel[]
+  mapPlaces                    MapPlace[]
+  contacts                     Contact[]
+  newsArticles                 NewsArticle[]
+
+  @@index([ownerId])
+  @@index([resourceType, resourceId])
+  @@index([checksum])
+}
+
+// ---------- Tourist points: temples / pagodas / shrines ----------
+
+model Temple {
+  id          String     @id
+  name        String     @db.VarChar(150)
+  type        TempleType
+  address     String     @db.VarChar(255)
+  openHours   String     @db.VarChar(100)
+  summary     String     @db.VarChar(300)
+  description Json
+  mediaId     String?
+  imageAlt    String     @default("") @db.VarChar(150)
+  sortOrder   Int        @default(0)
+  isActive    Boolean    @default(true)
+  version     Int        @default(1)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  media     Media?        @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?         @relation("TempleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?         @relation("TempleUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  events    TempleEvent[]
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([type, isActive, sortOrder])
+  @@index([name])
+}
+
+model TempleEvent {
+  id        String   @id @default(uuid())
+  templeId  String
+  time      String   @db.VarChar(50)
+  name      String   @db.VarChar(150)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  temple Temple @relation(fields: [templeId], references: [id], onDelete: Cascade)
+
+  @@index([templeId, sortOrder])
+}
+
+// ---------- Specialties: local food / fruit / gift products ----------
+
+model Specialty {
+  id          String            @id
+  name        String            @db.VarChar(150)
+  category    SpecialtyCategory
+  price       String            @db.VarChar(100)
+  season      String            @db.VarChar(100)
+  summary     String            @db.VarChar(300)
+  description Json
+  buyPlaces   Json
+  mediaId     String?
+  imageAlt    String            @default("") @db.VarChar(150)
+  sortOrder   Int               @default(0)
+  isActive    Boolean           @default(true)
+  version     Int               @default(1)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("SpecialtyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("SpecialtyUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([name])
+}
+
+// ---------- Historical sites: di tích lịch sử ----------
+
+model HistoricalSite {
+  id             String             @id
+  name           String             @db.VarChar(150)
+  rank           HistoricalSiteRank
+  address        String             @db.VarChar(255)
+  recognizedYear Int?
+  summary        String             @db.VarChar(300)
+  history        Json
+  highlights     Json
+  mediaId        String?
+  imageAlt       String             @default("") @db.VarChar(150)
+  sortOrder      Int                @default(0)
+  isActive       Boolean            @default(true)
+  version        Int                @default(1)
+  createdById    String?
+  updatedById    String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("HistoricalSiteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("HistoricalSiteUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([rank, isActive, sortOrder])
+  @@index([name])
+}
+
+// ---------- Agriculture: nông nghiệp ----------
+
+model AgricultureItem {
+  id          String              @id
+  name        String              @db.VarChar(150)
+  category    AgricultureCategory
+  location    String              @db.VarChar(255)
+  season      String              @db.VarChar(150)
+  scale       String              @db.VarChar(150)
+  summary     String              @db.VarChar(300)
+  description Json
+  highlights  Json
+  support     String              @db.VarChar(2000)
+  mediaId     String?
+  imageAlt    String              @default("") @db.VarChar(150)
+  sortOrder   Int                 @default(0)
+  isActive    Boolean             @default(true)
+  version     Int                 @default(1)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("AgricultureItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("AgricultureItemUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([name])
+}
+
+// ---------- OCOP: One Commune One Product ----------
+
+model OcopProduct {
+  id           String       @id
+  name         String       @db.VarChar(150)
+  category     OcopCategory
+  rating       OcopRating
+  producer     String       @db.VarChar(150)
+  address      String       @db.VarChar(255)
+  priceRange   String       @db.VarChar(100)
+  summary      String       @db.VarChar(300)
+  description  Json
+  highlights   Json
+  contactNote  String       @db.VarChar(2000)
+  contactPhone String?      @db.VarChar(30)
+  mediaId      String?
+  imageAlt     String       @default("") @db.VarChar(150)
+  sortOrder    Int          @default(0)
+  isActive     Boolean      @default(true)
+  version      Int          @default(1)
+  createdById  String?
+  updatedById  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("OcopProductCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("OcopProductUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([rating, isActive, sortOrder])
+  @@index([name])
+}
+
+// ---------- Craft villages: làng nghề ----------
+
+model CraftVillage {
+  id           String               @id
+  name         String               @db.VarChar(150)
+  category     CraftVillageCategory
+  address      String               @db.VarChar(255)
+  workingTime  String               @db.VarChar(100)
+  mainProducts String               @db.VarChar(255)
+  summary      String               @db.VarChar(300)
+  description  Json
+  highlights   Json
+  visitorNote  String               @db.VarChar(2000)
+  mediaId      String?
+  imageAlt     String               @default("") @db.VarChar(150)
+  sortOrder    Int                  @default(0)
+  isActive     Boolean              @default(true)
+  version      Int                  @default(1)
+  createdById  String?
+  updatedById  String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("CraftVillageCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("CraftVillageUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([name])
+}
+
+// ---------- Cuisine: ẩm thực ----------
+
+model CuisineItem {
+  id              String          @id
+  name            String          @db.VarChar(150)
+  category        CuisineCategory
+  priceRange      String          @db.VarChar(100)
+  bestTime        String          @db.VarChar(100)
+  suggestedPlaces Json
+  summary         String          @db.VarChar(300)
+  description     Json
+  highlights      Json
+  tip             String          @db.VarChar(2000)
+  mediaId         String?
+  imageAlt        String          @default("") @db.VarChar(150)
+  sortOrder       Int             @default(0)
+  isActive        Boolean         @default(true)
+  version         Int             @default(1)
+  createdById     String?
+  updatedById     String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("CuisineItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("CuisineItemUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([name])
+}
+
+// ---------- Festivals: lễ hội ----------
+
+model Festival {
+  id          String           @id
+  name        String           @db.VarChar(150)
+  category    FestivalCategory
+  time        String           @db.VarChar(150)
+  location    String           @db.VarChar(255)
+  scale       String           @db.VarChar(100)
+  summary     String           @db.VarChar(300)
+  description Json
+  activities  Json
+  note        String           @db.VarChar(2000)
+  mediaId     String?
+  imageAlt    String           @default("") @db.VarChar(150)
+  sortOrder   Int              @default(0)
+  isActive    Boolean          @default(true)
+  version     Int              @default(1)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("FestivalCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("FestivalUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([name])
+}
+
+model ExperienceTour {
+  id           String                 @id
+  name         String                 @db.VarChar(150)
+  category     ExperienceTourCategory
+  duration     String                 @db.VarChar(100)
+  startTime    String                 @db.VarChar(100)
+  priceRange   String                 @db.VarChar(100)
+  meetingPoint String                 @db.VarChar(255)
+  summary      String                 @db.VarChar(300)
+  description  Json
+  itinerary    Json
+  included     Json
+  note         String                 @db.VarChar(2000)
+  contactPhone String?                @db.VarChar(30)
+  mediaId      String?
+  imageAlt     String                 @default("") @db.VarChar(150)
+  sortOrder    Int                    @default(0)
+  isActive     Boolean                @default(true)
+  version      Int                    @default(1)
+  createdById  String?
+  updatedById  String?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("ExperienceTourCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("ExperienceTourUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([name])
+}
+
+// ---------- Phản hồi ----------
+
+model FeedbackChannel {
+  id           String                  @id
+  title        String                  @db.VarChar(200)
+  category     FeedbackChannelCategory
+  responseTime String                  @db.VarChar(150)
+  requiredInfo Json
+  summary      String                  @db.VarChar(300)
+  description  Json
+  examples     Json
+  note         String                  @db.VarChar(2000)
+  mediaId      String?
+  imageAlt     String                  @default("") @db.VarChar(150)
+  sortOrder    Int                     @default(0)
+  isActive     Boolean                 @default(true)
+  version      Int                     @default(1)
+  createdById  String?
+  updatedById  String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  media     Media?           @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?            @relation("FeedbackChannelCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?            @relation("FeedbackChannelUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  tickets   FeedbackTicket[]
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([title])
+}
+
+model FeedbackTicket {
+  id          String               @id @default(uuid())
+  ticketCode  String               @unique
+  channelId   String?
+  fullName    String               @db.VarChar(150)
+  phone       String               @db.VarChar(30)
+  content     String               @db.VarChar(5000)
+  status      FeedbackTicketStatus @default(NEW)
+  adminNote   String?              @db.VarChar(2000)
+  handledById String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  resolvedAt  DateTime?
+
+  channel   FeedbackChannel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  handledBy User?            @relation("FeedbackTicketHandler", fields: [handledById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([channelId])
+  @@index([phone])
+}
+
+// ---------- Bản đồ ----------
+
+model MapPlace {
+  id                 String           @id
+  name               String           @db.VarChar(150)
+  category           MapPlaceCategory
+  address            String           @db.VarChar(255)
+  lat                Decimal          @db.Decimal(9, 6)
+  lng                Decimal          @db.Decimal(9, 6)
+  openTime           String           @db.VarChar(150)
+  distanceFromCenter String           @db.VarChar(100)
+  summary            String           @db.VarChar(300)
+  description        Json
+  highlights         Json
+  directionNote      String           @db.VarChar(2000)
+  mediaId            String?
+  imageAlt           String           @default("") @db.VarChar(150)
+  sortOrder          Int              @default(0)
+  isActive           Boolean          @default(true)
+  version            Int              @default(1)
+  createdById        String?
+  updatedById        String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("MapPlaceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("MapPlaceUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([name])
+}
+
+// ---------- Liên hệ ----------
+
+model Contact {
+  id            String          @id
+  name          String          @db.VarChar(150)
+  category      ContactCategory
+  role          String          @db.VarChar(255)
+  phone         String          @db.VarChar(30)
+  email         String?         @db.VarChar(255)
+  address       String          @db.VarChar(255)
+  workingTime   String          @db.VarChar(150)
+  summary       String          @db.VarChar(300)
+  description   Json
+  supportTopics Json
+  note          String          @db.VarChar(2000)
+  mediaId       String?
+  imageAlt      String          @default("") @db.VarChar(150)
+  sortOrder     Int             @default(0)
+  isActive      Boolean         @default(true)
+  version       Int             @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("ContactCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("ContactUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder, createdAt])
+  @@index([category, isActive, sortOrder])
+  @@index([name])
+}
+
+// ---------- Tin tức ----------
+
+model NewsArticle {
+  id           String       @id
+  title        String       @db.VarChar(200)
+  category     NewsCategory
+  publishedAt  DateTime
+  author       String       @db.VarChar(150)
+  summary      String       @db.VarChar(300)
+  content      Json
+  tags         Json
+  relatedLinks Json
+  mediaId      String?
+  imageAlt     String       @default("") @db.VarChar(150)
+  isActive     Boolean      @default(true)
+  version      Int          @default(1)
+  createdById  String?
+  updatedById  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  createdBy User?  @relation("NewsArticleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?  @relation("NewsArticleUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, publishedAt])
+  @@index([category, isActive, publishedAt])
+  @@index([title])
+}
+
+// ---------- Business registration ----------
+
+model BusinessApplication {
+  id                  String                    @id @default(uuid())
+  applicantType       BusinessApplicantType
+  businessName        String
+  businessCategory    String
+  contactName         String
+  contactPhone        String
+  contactEmail        String
+  address             String
+  identityNumber      String?
+  identityIssuedAt    DateTime?
+  identityIssuedPlace String?
+  legalName           String?
+  taxCode             String?
+  representativeName  String?
+  representativeTitle String?
+  website             String?
+  description         String?
+  status              BusinessApplicationStatus @default(PENDING)
+  rejectionReason     String?
+  submittedById       String?
+  reviewedById        String?
+  reviewedAt          DateTime?
+  createdUserId       String?                   @unique
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  submittedBy User?                         @relation("BusinessApplicationSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
+  reviewedBy  User?                         @relation("BusinessApplicationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  createdUser User?                         @relation("BusinessApplicationAccount", fields: [createdUserId], references: [id], onDelete: SetNull)
+  documents   BusinessApplicationDocument[]
+
+  @@index([status, createdAt])
+  @@index([applicantType])
+  @@index([contactEmail])
+  @@index([taxCode])
+  @@index([submittedById, createdAt])
+}
+
+model BusinessApplicationDocument {
+  id            String               @id @default(uuid())
+  applicationId String
+  type          BusinessDocumentType
+  name          String
+  mediaId       String
+  createdAt     DateTime             @default(now())
+
+  application BusinessApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  media       Media               @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@unique([applicationId, mediaId])
+  @@index([applicationId])
+}
+
+// ---------- About page CMS ----------
+
+model AboutPage {
+  id                String    @id @default("about")
+  draftSnapshot     Json
+  publishedSnapshot Json?
+  version           Int       @default(1)
+  publishedVersion  Int       @default(0)
+  createdById       String?
+  updatedById       String?
+  publishedById     String?
+  publishedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  createdBy   User?           @relation("AboutPageCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy   User?           @relation("AboutPageUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  publishedBy User?           @relation("AboutPagePublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+  revisions   AboutRevision[]
+}
+
+model AboutRevision {
+  id            String   @id @default(uuid())
+  aboutPageId   String
+  version       Int
+  snapshot      Json
+  publishedById String?
+  publishedAt   DateTime @default(now())
+
+  aboutPage   AboutPage @relation(fields: [aboutPageId], references: [id], onDelete: Cascade)
+  publishedBy User?     @relation("AboutRevisionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+
+  @@unique([aboutPageId, version])
+  @@index([aboutPageId, publishedAt])
+}
+
+// ---------- TradePost ----------
+
+model TradePost {
+  id               String             @id @default(uuid())
+  slug             String             @unique
+  ownerId          String
+  owner            User               @relation("TradePostOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  category         TradePostCategory
+  title            String
+  summary          String
+  description      String
+  priceType        TradePostPriceType
+  price            Decimal?           @db.Decimal(14, 2)
+  priceLabel       String?
+  address          String
+  lat              Decimal?           @db.Decimal(9, 6)
+  lng              Decimal?           @db.Decimal(9, 6)
+  contactName      String
+  contactPhone     String
+  contactZalo      String?
+  thumbnailUrl     String?
+  status           TradePostStatus    @default(DRAFT)
+  featured         Boolean            @default(false)
+  promotionPercent Int?
+  promotionStartAt DateTime?
+  promotionEndAt   DateTime?
+  expiresAt        DateTime?
+  viewCount        Int                @default(0)
+  averageRating    Decimal            @default(0) @db.Decimal(2, 1)
+  reviewCount      Int                @default(0)
+  publishedAt      DateTime?
+  rejectedReason   String?
+  approvedById     String?
+  approvedBy       User?              @relation("TradePostApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt       DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  deletedAt        DateTime?
+
+  images  TradePostImage[]
+  reviews TradeReview[]
+
+  @@index([status, publishedAt])
+  @@index([ownerId])
+  @@index([category])
+  @@index([featured])
+}
+
+model TradePostImage {
+  id          String    @id @default(uuid())
+  tradePostId String
+  tradePost   TradePost @relation(fields: [tradePostId], references: [id], onDelete: Cascade)
+  mediaId     String
+  media       Media     @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@unique([tradePostId, mediaId])
+  @@index([tradePostId, sortOrder])
+}
+
+// ---------- TradeReview ----------
+
+model TradeReview {
+  id          String            @id @default(uuid())
+  tradePostId String
+  tradePost   TradePost         @relation(fields: [tradePostId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  rating      Int
+  content     String            @db.VarChar(500)
+  status      TradeReviewStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  deletedAt   DateTime?
+
+  images TradeReviewImage[]
+
+  // True "one active review per user per post" is enforced via a hand-written
+  // Postgres partial unique index (see migrations) — Prisma's schema DSL
+  // cannot express a WHERE-filtered unique constraint. This index exists
+  // for query-planning only.
+  @@index([tradePostId, userId])
+  @@index([tradePostId, status])
+  @@index([userId])
+}
+
+model TradeReviewImage {
+  id            String      @id @default(uuid())
+  tradeReviewId String
+  tradeReview   TradeReview @relation(fields: [tradeReviewId], references: [id], onDelete: Cascade)
+  mediaId       String
+  media         Media       @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+
+  @@unique([tradeReviewId, mediaId])
+}
+
+// ---------- Audit ----------
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorId      String?
+  actor        User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action       String
+  resourceType String
+  resourceId   String?
+  oldData      Json?
+  newData      Json?
+  ipAddress    String?
+  userAgent    String?
+  requestId    String?
+  createdAt    DateTime @default(now())
+
+  @@index([resourceType, resourceId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@index([action])
+}

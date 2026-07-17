@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /f/LocalGo -maxdepth 3 -iname \"specialties.ts\" 2>/dev/null; find / -maxdepth 2 -iname \"LocalGo*\" 2>/dev/null)",
+      "Read(//f//**)"
+    ]
+  }
+}
