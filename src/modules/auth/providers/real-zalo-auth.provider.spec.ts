@@ -67,6 +67,28 @@ describe('RealZaloAuthProvider', () => {
     expect(calledInit.headers).toMatchObject({ secret_key: 'my-secret' });
   });
 
+  it('does not treat a success response as an error just because it carries error:0/message:"Success"', async () => {
+    const provider = new RealZaloAuthProvider(fakeConfigService('secret'));
+    mockFetchOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          error: 0,
+          message: 'Success',
+          id: 'zalo-123',
+          name: 'Nguyễn Văn A',
+          picture: { data: { url: 'https://example.invalid/avatar.jpg' } },
+        }),
+    });
+
+    const profile = await provider.verifyAccessToken('valid-token');
+    expect(profile).toEqual({
+      zaloId: 'zalo-123',
+      name: 'Nguyễn Văn A',
+      avatarUrl: 'https://example.invalid/avatar.jpg',
+    });
+  });
+
   it('rejects when Zalo returns an error payload', async () => {
     const provider = new RealZaloAuthProvider(fakeConfigService('secret'));
     mockFetchOnce({

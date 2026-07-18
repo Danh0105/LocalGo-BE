@@ -10,15 +10,19 @@ import type {
 
 const ZALO_GRAPH_ME_URL = 'https://graph.zalo.me/v2.0/me';
 
-interface ZaloGraphMeSuccess {
-  id: string;
-  name: string;
+/**
+ * Zalo's Graph API always includes `error`/`message` in the response body —
+ * `error: 0` and `message: "Success"` on success — alongside the profile
+ * fields, rather than reserving those keys for failure cases. Whether the
+ * call succeeded must be determined by the presence of `id`, not by the
+ * presence of the `error` key.
+ */
+interface ZaloGraphMeResponse {
+  error?: number;
+  message?: string;
+  id?: string;
+  name?: string;
   picture?: { data?: { url?: string } };
-}
-
-interface ZaloGraphMeError {
-  error: number;
-  message: string;
 }
 
 /**
@@ -68,9 +72,9 @@ export class RealZaloAuthProvider implements ZaloAuthProvider {
       );
     }
 
-    let body: ZaloGraphMeSuccess | ZaloGraphMeError;
+    let body: ZaloGraphMeResponse;
     try {
-      body = (await response.json()) as ZaloGraphMeSuccess | ZaloGraphMeError;
+      body = (await response.json()) as ZaloGraphMeResponse;
     } catch {
       throw new AppException(
         ErrorCode.INTERNAL_ERROR,
@@ -79,19 +83,15 @@ export class RealZaloAuthProvider implements ZaloAuthProvider {
       );
     }
 
-    if (!response.ok || 'error' in body) {
-      const message =
-        'error' in body
-          ? body.message
-          : 'Access token Zalo không hợp lệ hoặc đã hết hạn';
+    if (!response.ok || !body.id) {
       throw new AppException(
         ErrorCode.INVALID_CREDENTIALS,
-        message,
+        body.message || 'Access token Zalo không hợp lệ hoặc đã hết hạn',
         HttpStatus.UNAUTHORIZED,
       );
     }
 
-    if (!body.id || !body.name) {
+    if (!body.name) {
       throw new AppException(
         ErrorCode.INVALID_CREDENTIALS,
         'Zalo không trả về đủ thông tin người dùng',
