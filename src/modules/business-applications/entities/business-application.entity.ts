@@ -31,6 +31,9 @@ export class BusinessApplicationEntity {
   representativeTitle: string | null;
   website: string | null;
   description: string | null;
+  zaloId: string | null;
+  zaloDisplayName: string | null;
+  zaloAvatarUrl: string | null;
   documents: BusinessApplicationDocumentView[];
   status: BusinessApplicationStatus;
   rejectionReason: string | null;
@@ -61,6 +64,9 @@ export class BusinessApplicationEntity {
     this.representativeTitle = record.representativeTitle;
     this.website = record.website;
     this.description = record.description;
+    this.zaloId = record.zaloId;
+    this.zaloDisplayName = record.zaloDisplayName;
+    this.zaloAvatarUrl = record.zaloAvatarUrl;
     this.documents = record.documents.map((document) => ({
       id: document.id,
       name: document.name,

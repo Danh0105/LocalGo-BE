@@ -34,6 +34,16 @@ export class BusinessApplicationRepository {
     });
   }
 
+  findLatestStatusByZaloId(
+    zaloId: string,
+  ): Promise<{ status: BusinessApplicationStatus } | null> {
+    return this.prisma.businessApplication.findFirst({
+      where: { zaloId },
+      orderBy: { createdAt: 'desc' },
+      select: { status: true },
+    });
+  }
+
   async findAdminList(params: {
     skip: number;
     take: number;

@@ -834,6 +834,9 @@ model BusinessApplication {
   representativeTitle String?
   website             String?
   description         String?
+  zaloId              String?
+  zaloDisplayName     String?
+  zaloAvatarUrl       String?
   status              BusinessApplicationStatus @default(PENDING)
   rejectionReason     String?
   submittedById       String?
@@ -853,6 +856,7 @@ model BusinessApplication {
   @@index([contactEmail])
   @@index([taxCode])
   @@index([submittedById, createdAt])
+  @@index([zaloId, createdAt])
 }
 
 model BusinessApplicationDocument {

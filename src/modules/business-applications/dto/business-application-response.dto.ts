@@ -45,6 +45,9 @@ export class BusinessApplicationResponseDto {
   @ApiPropertyOptional({ nullable: true }) representativeTitle: string | null;
   @ApiPropertyOptional({ nullable: true }) website: string | null;
   @ApiPropertyOptional({ nullable: true }) description: string | null;
+  @ApiPropertyOptional({ nullable: true }) zaloId: string | null;
+  @ApiPropertyOptional({ nullable: true }) zaloDisplayName: string | null;
+  @ApiPropertyOptional({ nullable: true }) zaloAvatarUrl: string | null;
   @ApiProperty({ type: [BusinessApplicationDocumentResponseDto] })
   documents: BusinessApplicationDocumentResponseDto[];
   @ApiProperty({ enum: ['PENDING', 'APPROVED', 'REJECTED'] })

@@ -85,6 +85,26 @@ export class UpsertBusinessApplicationDto {
   @MaxLength(2000)
   description?: string | null;
 
+  @ApiProperty({
+    description: 'Zalo ID của người nộp hồ sơ, dùng làm tham chiếu xác thực',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  zaloId: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  zaloDisplayName?: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @IsUrl({ require_protocol: true })
+  @MaxLength(1000)
+  zaloAvatarUrl?: string | null;
+
   @ApiProperty({ type: [BusinessApplicationDocumentInputDto] })
   @IsArray()
   @ArrayMinSize(1)

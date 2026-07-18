@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { Public } from '../../../common/decorators/public.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.interface';
 import { BusinessApplicationResponseDto } from '../dto/business-application-response.dto';
+import { CheckBusinessApplicationDto } from '../dto/check-business-application.dto';
+import { CheckBusinessApplicationResponseDto } from '../dto/check-business-application-response.dto';
 import { UpsertBusinessApplicationDto } from '../dto/upsert-business-application.dto';
 import { BusinessApplicationService } from '../services/business-application.service';
 
@@ -12,6 +15,19 @@ import { BusinessApplicationService } from '../services/business-application.ser
 @Controller('business-applications')
 export class BusinessApplicationsController {
   constructor(private readonly service: BusinessApplicationService) {}
+
+  @Public()
+  @Get('check')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({
+    summary:
+      'Kiểm tra theo Zalo ID xem đã nộp hồ sơ Business hay chưa (dùng để điều hướng UI)',
+  })
+  async check(
+    @Query() query: CheckBusinessApplicationDto,
+  ): Promise<CheckBusinessApplicationResponseDto> {
+    return this.service.checkByZaloId(query.zaloId);
+  }
 
   @Post()
   @Throttle({ default: { limit: 5, ttl: 60_000 } })

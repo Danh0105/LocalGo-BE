@@ -15,6 +15,7 @@ const common = {
   contactPhone: '0901234567',
   contactEmail: 'a@example.com',
   address: 'Tây Ninh',
+  zaloId: 'zalo-123',
   documents: [],
 };
 

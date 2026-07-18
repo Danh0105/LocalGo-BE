@@ -47,8 +47,8 @@ export class BusinessApplicationService {
     await this.prisma.$transaction(async (tx) => {
       const pending = await tx.businessApplication.count({
         where: {
-          submittedById: userId,
           status: BusinessApplicationStatus.PENDING,
+          OR: [{ submittedById: userId }, { zaloId: dto.zaloId }],
         },
       });
       if (pending > 0) {
@@ -93,6 +93,13 @@ export class BusinessApplicationService {
     const record = await this.repository.findLatestForUser(userId);
     if (!record) throw this.notFound();
     return this.toEntity(record);
+  }
+
+  async checkByZaloId(
+    zaloId: string,
+  ): Promise<{ exists: boolean; status: BusinessApplicationStatus | null }> {
+    const record = await this.repository.findLatestStatusByZaloId(zaloId);
+    return { exists: !!record, status: record?.status ?? null };
   }
 
   async update(
@@ -395,6 +402,9 @@ export class BusinessApplicationService {
       representativeTitle: dto.representativeTitle?.trim() || null,
       website: dto.website?.trim() || null,
       description: dto.description?.trim() || null,
+      zaloId: dto.zaloId.trim(),
+      zaloDisplayName: dto.zaloDisplayName?.trim() || null,
+      zaloAvatarUrl: dto.zaloAvatarUrl?.trim() || null,
     };
   }
 
