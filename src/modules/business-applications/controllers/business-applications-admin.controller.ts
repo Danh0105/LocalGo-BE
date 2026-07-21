@@ -4,7 +4,6 @@ import { UserRole } from '../../../../generated/prisma';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.interface';
-import { ApproveBusinessApplicationDto } from '../dto/approve-business-application.dto';
 import { BusinessApplicationResponseDto } from '../dto/business-application-response.dto';
 import { QueryBusinessApplicationsDto } from '../dto/query-business-applications.dto';
 import { RejectBusinessApplicationDto } from '../dto/reject-business-application.dto';
@@ -30,14 +29,15 @@ export class BusinessApplicationsAdminController {
   }
 
   @Post(':id/approve')
-  @ApiOperation({ summary: '[Admin] Duyệt hồ sơ và tạo tài khoản BUSINESS' })
+  @ApiOperation({
+    summary: '[Admin] Duyệt hồ sơ và nâng tài khoản Zalo thành BUSINESS',
+  })
   async approve(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('id') id: string,
-    @Body() dto: ApproveBusinessApplicationDto,
   ) {
     return BusinessApplicationResponseDto.fromEntity(
-      await this.service.approve(actor.id, id, dto),
+      await this.service.approve(actor.id, id),
     );
   }
 

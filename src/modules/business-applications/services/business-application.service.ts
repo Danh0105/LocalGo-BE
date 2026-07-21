@@ -1,5 +1,4 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import * as argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
 import {
   BusinessApplicantType,
@@ -8,7 +7,6 @@ import {
   MediaResourceType,
   Prisma,
   UserRole,
-  UserStatus,
 } from '../../../../generated/prisma';
 import { ErrorCode } from '../../../common/constants/error-codes.constant';
 import { PaginatedResultDto } from '../../../common/dto/pagination-meta.dto';
@@ -19,7 +17,6 @@ import {
 } from '../../../common/pagination/pagination.util';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaService } from '../../media/services/media.service';
-import { ApproveBusinessApplicationDto } from '../dto/approve-business-application.dto';
 import { QueryBusinessApplicationsDto } from '../dto/query-business-applications.dto';
 import { UpsertBusinessApplicationDto } from '../dto/upsert-business-application.dto';
 import { BusinessApplicationEntity } from '../entities/business-application.entity';
@@ -187,13 +184,7 @@ export class BusinessApplicationService {
     );
   }
 
-  async approve(
-    actorId: string,
-    id: string,
-    dto: ApproveBusinessApplicationDto,
-  ): Promise<BusinessApplicationEntity> {
-    const email = dto.email.trim().toLowerCase();
-    const passwordHash = await argon2.hash(dto.initialPassword);
+  async approve(actorId: string, id: string): Promise<BusinessApplicationEntity> {
     await this.prisma.$transaction(
       async (tx) => {
         const application = await tx.businessApplication.findUnique({
@@ -202,21 +193,51 @@ export class BusinessApplicationService {
         if (!application) throw this.notFound();
         if (application.status !== BusinessApplicationStatus.PENDING)
           throw this.alreadyReviewed();
-        if (await tx.user.count({ where: { email, deletedAt: null } })) {
+        if (!application.submittedById) {
           throw new AppException(
-            ErrorCode.EMAIL_ALREADY_EXISTS,
-            'Email này đã được sử dụng. Vui lòng nhập email khác.',
+            ErrorCode.INVALID_BUSINESS_APPLICATION,
+            'Hồ sơ không còn liên kết với tài khoản Zalo đã nộp.',
             HttpStatus.CONFLICT,
           );
         }
+        const submitter = await tx.user.findFirst({
+          where: { id: application.submittedById, deletedAt: null },
+        });
+        if (!submitter) {
+          throw new AppException(
+            ErrorCode.INVALID_BUSINESS_APPLICATION,
+            'Không tìm thấy tài khoản Zalo đã nộp hồ sơ.',
+            HttpStatus.CONFLICT,
+          );
+        }
+        const normalizedEmail = application.contactEmail.trim().toLowerCase();
         if (
           await tx.user.count({
-            where: { phone: application.contactPhone, deletedAt: null },
+            where: {
+              phone: application.contactPhone,
+              deletedAt: null,
+              id: { not: submitter.id },
+            },
           })
         ) {
           throw new AppException(
             ErrorCode.PHONE_ALREADY_EXISTS,
             'Số điện thoại trong hồ sơ đã thuộc về một tài khoản khác.',
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (
+          await tx.user.count({
+            where: {
+              email: normalizedEmail,
+              deletedAt: null,
+              id: { not: submitter.id },
+            },
+          })
+        ) {
+          throw new AppException(
+            ErrorCode.EMAIL_ALREADY_EXISTS,
+            'Email trong hồ sơ đã thuộc về một tài khoản khác.',
             HttpStatus.CONFLICT,
           );
         }
@@ -229,14 +250,13 @@ export class BusinessApplicationService {
           },
         });
         if (claimed.count !== 1) throw this.alreadyReviewed();
-        const user = await tx.user.create({
+        const user = await tx.user.update({
+          where: { id: submitter.id },
           data: {
-            displayName: dto.displayName.trim(),
-            email,
+            displayName: submitter.displayName || application.contactName,
+            email: normalizedEmail,
             phone: application.contactPhone,
-            passwordHash,
             role: UserRole.BUSINESS,
-            status: UserStatus.ACTIVE,
           },
         });
         await tx.businessApplication.update({

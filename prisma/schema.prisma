@@ -181,13 +181,6 @@ enum BusinessDocumentType {
   OTHER
 }
 
-enum TradePostCategory {
-  PRODUCT
-  SERVICE
-  BUY_REQUEST
-  PROMOTION
-}
-
 enum TradePostPriceType {
   FIXED
   NEGOTIABLE
@@ -267,6 +260,8 @@ model User {
   contactsUpdated               Contact[]             @relation("ContactUpdater")
   newsArticlesCreated           NewsArticle[]         @relation("NewsArticleCreator")
   newsArticlesUpdated           NewsArticle[]         @relation("NewsArticleUpdater")
+  tradePostCategoriesCreated    TradePostCategory[]   @relation("TradePostCategoryCreator")
+  tradePostCategoriesUpdated    TradePostCategory[]   @relation("TradePostCategoryUpdater")
 
   @@index([role])
 }
@@ -912,12 +907,36 @@ model AboutRevision {
 
 // ---------- TradePost ----------
 
+model TradePostCategory {
+  id                       String    @id @default(uuid())
+  code                     String    @unique @db.VarChar(50)
+  name                     String    @db.VarChar(120)
+  description              String?   @db.VarChar(300)
+  sortOrder                Int       @default(0)
+  isActive                 Boolean   @default(true)
+  requiresPromotionDetails Boolean   @default(false)
+  version                  Int       @default(1)
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  deletedAt                DateTime?
+  createdById              String?
+  updatedById              String?
+
+  posts     TradePost[]
+  createdBy User?       @relation("TradePostCategoryCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy User?       @relation("TradePostCategoryUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([isActive, sortOrder])
+  @@index([deletedAt])
+}
+
 model TradePost {
   id               String             @id @default(uuid())
   slug             String             @unique
   ownerId          String
   owner            User               @relation("TradePostOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  category         TradePostCategory
+  categoryId       String
+  category         TradePostCategory  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   title            String
   summary          String
   description      String
@@ -954,7 +973,7 @@ model TradePost {
 
   @@index([status, publishedAt])
   @@index([ownerId])
-  @@index([category])
+  @@index([categoryId])
   @@index([featured])
 }
 

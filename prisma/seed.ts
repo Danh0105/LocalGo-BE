@@ -6,7 +6,6 @@ import {
   Prisma,
   PrismaClient,
   MediaResourceType,
-  TradePostCategory,
   TradePostPriceType,
   TradePostStatus,
   TradeReviewStatus,
@@ -30,6 +29,37 @@ import { NEWS_SEED_DATA } from './news-seed-data';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
+
+const TRADE_POST_CATEGORY_SEED_DATA = [
+  {
+    code: 'PRODUCT',
+    name: 'Sản phẩm',
+    description: 'Đặc sản và sản phẩm địa phương',
+    sortOrder: 0,
+    requiresPromotionDetails: false,
+  },
+  {
+    code: 'SERVICE',
+    name: 'Dịch vụ',
+    description: 'Kết nối dịch vụ và tiện ích',
+    sortOrder: 1,
+    requiresPromotionDetails: false,
+  },
+  {
+    code: 'BUY_REQUEST',
+    name: 'Cần mua',
+    description: 'Tìm sản phẩm, dịch vụ và đối tác',
+    sortOrder: 2,
+    requiresPromotionDetails: false,
+  },
+  {
+    code: 'PROMOTION',
+    name: 'Khuyến mãi',
+    description: 'Ưu đãi và chương trình khuyến mãi',
+    sortOrder: 3,
+    requiresPromotionDetails: true,
+  },
+] as const;
 
 /**
  * Idempotent: every create below is an upsert keyed on a unique field, so
@@ -133,7 +163,8 @@ async function main(): Promise<void> {
 
   // ---------- Đặc sản ----------
   // Same optional shared placeholder pattern as Đền - Chùa - Miếu above.
-  const specialtyPlaceholderMediaId = process.env.SPECIALTY_PLACEHOLDER_MEDIA_ID;
+  const specialtyPlaceholderMediaId =
+    process.env.SPECIALTY_PLACEHOLDER_MEDIA_ID;
   const specialtyPlaceholderMedia = specialtyPlaceholderMediaId
     ? await prisma.media.findFirst({
         where: {
@@ -380,7 +411,8 @@ async function main(): Promise<void> {
         category: item.category,
         priceRange: item.priceRange,
         bestTime: item.bestTime,
-        suggestedPlaces: item.suggestedPlaces as unknown as Prisma.InputJsonValue,
+        suggestedPlaces:
+          item.suggestedPlaces as unknown as Prisma.InputJsonValue,
         summary: item.summary,
         description: item.description,
         highlights: item.highlights,
@@ -672,7 +704,9 @@ async function main(): Promise<void> {
     create: {
       email: 'moderator@localgo.local',
       displayName: 'Kiểm duyệt viên',
-      passwordHash: await argon2.hash('Moderator@123456'),
+      passwordHash: await argon2.hash(
+        process.env.SEED_MODERATOR_PASSWORD ?? 'Moderator@123456',
+      ),
       role: UserRole.MODERATOR,
       status: UserStatus.ACTIVE,
     },
@@ -730,12 +764,29 @@ async function main(): Promise<void> {
     ),
   );
 
+  const tradePostCategories = new Map(
+    await Promise.all(
+      TRADE_POST_CATEGORY_SEED_DATA.map(async (category) => {
+        const record = await prisma.tradePostCategory.upsert({
+          where: { code: category.code },
+          update: {},
+          create: {
+            ...category,
+            createdById: admin.id,
+            updatedById: admin.id,
+          },
+        });
+        return [record.code, record.id] as const;
+      }),
+    ),
+  );
+
   // ---------- Trade posts (representative fixtures across every status) ----------
   const tradePostFixtures = [
     {
       slug: 'buoi-da-xanh-truong-mit',
       ownerId: business1.id,
-      category: TradePostCategory.PRODUCT,
+      categoryCode: 'PRODUCT',
       title: 'Bưởi da xanh Truông Mít chính gốc',
       summary: 'Bưởi da xanh trồng theo hướng hữu cơ, ngọt thanh, ít hạt.',
       description:
@@ -751,7 +802,7 @@ async function main(): Promise<void> {
     {
       slug: 'banh-trang-phoi-suong-tay-ninh',
       ownerId: business2.id,
-      category: TradePostCategory.PRODUCT,
+      categoryCode: 'PRODUCT',
       title: 'Bánh tráng phơi sương Tây Ninh',
       summary: 'Bánh tráng phơi sương thủ công, dẻo mềm, đúng vị đặc sản.',
       description:
@@ -767,7 +818,7 @@ async function main(): Promise<void> {
     {
       slug: 'dich-vu-cho-thue-xe-dien-tham-quan',
       ownerId: business1.id,
-      category: TradePostCategory.SERVICE,
+      categoryCode: 'SERVICE',
       title: 'Dịch vụ cho thuê xe điện tham quan',
       summary: 'Cho thuê xe điện tham quan các điểm du lịch trong xã.',
       description:
@@ -782,7 +833,7 @@ async function main(): Promise<void> {
     {
       slug: 'can-mua-dua-hau-so-luong-lon',
       ownerId: business2.id,
-      category: TradePostCategory.BUY_REQUEST,
+      categoryCode: 'BUY_REQUEST',
       title: 'Cần mua dưa hấu số lượng lớn',
       summary: 'Thu mua dưa hấu cho vựa trái cây, số lượng lớn, giá tốt.',
       description:
@@ -796,7 +847,7 @@ async function main(): Promise<void> {
     {
       slug: 'khuyen-mai-dac-san-dip-le',
       ownerId: business1.id,
-      category: TradePostCategory.PROMOTION,
+      categoryCode: 'PROMOTION',
       title: 'Khuyến mãi đặc sản dịp lễ',
       summary: 'Giảm giá 20% cho combo đặc sản dịp lễ hội truyền thống.',
       description:
@@ -815,7 +866,7 @@ async function main(): Promise<void> {
     {
       slug: 'dac-san-mut-me-truong-mit',
       ownerId: business2.id,
-      category: TradePostCategory.PRODUCT,
+      categoryCode: 'PRODUCT',
       title: 'Mứt me Truông Mít',
       summary: 'Mứt me chua ngọt, đặc sản địa phương, đã ngừng kinh doanh.',
       description: 'Sản phẩm theo mùa, hiện đã ngừng nhận đơn hàng mới.',
@@ -831,12 +882,17 @@ async function main(): Promise<void> {
 
   const tradePosts = [];
   for (const fixture of tradePostFixtures) {
-    const { status, ...rest } = fixture;
+    const { categoryCode, status, ...rest } = fixture;
+    const categoryId = tradePostCategories.get(categoryCode);
+    if (!categoryId) {
+      throw new Error(`Missing trade post category seed: ${categoryCode}`);
+    }
     const post = await prisma.tradePost.upsert({
       where: { slug: fixture.slug },
       update: {},
       create: {
         ...rest,
+        categoryId,
         status,
         publishedAt: status === TradePostStatus.PUBLISHED ? new Date() : null,
         approvedById:
@@ -893,7 +949,9 @@ async function main(): Promise<void> {
 
   console.log('Seed hoàn tất:');
   console.log(`  Admin: ${seedAdminEmail} / (mật khẩu từ SEED_ADMIN_PASSWORD)`);
-  console.log(`  Moderator: moderator@localgo.local / Moderator@123456`);
+  console.log(
+    `  Moderator: moderator@localgo.local / (mật khẩu từ SEED_MODERATOR_PASSWORD)`,
+  );
   console.log(`  Business: ${business1.displayName}, ${business2.displayName}`);
   console.log(`  Users: ${users.map((u) => u.displayName).join(', ')}`);
   console.log(`  Trade posts: ${tradePosts.length}`);

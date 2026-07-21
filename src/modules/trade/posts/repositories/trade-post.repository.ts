@@ -1,17 +1,23 @@
 import { Injectable } from '@nestjs/common';
-import type { Prisma, TradePost } from '../../../../../generated/prisma';
+import type { Prisma } from '../../../../../generated/prisma';
 import { PrismaService } from '../../../../database/prisma.service';
 import type {
+  TradePostWithCategory,
   TradePostWithImages,
   TradePostWithImagesAndOwner,
   TradePostWithOwner,
 } from '../entities/trade-post.entity';
 
 const DETAIL_INCLUDE = {
+  category: true,
   images: {
     include: { media: true },
     orderBy: { sortOrder: 'asc' as const },
   },
+} satisfies Prisma.TradePostInclude;
+
+const LIST_INCLUDE = {
+  category: true,
 } satisfies Prisma.TradePostInclude;
 
 const OWNER_SELECT = {
@@ -33,8 +39,11 @@ export class TradePostRepository {
     return count > 0;
   }
 
-  findByIdForOwner(id: string): Promise<TradePost | null> {
-    return this.prisma.tradePost.findFirst({ where: { id, deletedAt: null } });
+  findByIdForOwner(id: string): Promise<TradePostWithCategory | null> {
+    return this.prisma.tradePost.findFirst({
+      where: { id, deletedAt: null },
+      include: LIST_INCLUDE,
+    });
   }
 
   findDetailBySlugOrId(idOrSlug: string): Promise<TradePostWithImages | null> {
@@ -68,7 +77,7 @@ export class TradePostRepository {
         orderBy: params.orderBy,
         skip: params.skip,
         take: params.take,
-        include: { owner: { select: OWNER_SELECT } },
+        include: { ...LIST_INCLUDE, owner: { select: OWNER_SELECT } },
       }),
       this.prisma.tradePost.count({ where: params.where }),
     ]);
@@ -82,13 +91,14 @@ export class TradePostRepository {
     orderBy:
       | Prisma.TradePostOrderByWithRelationInput
       | Prisma.TradePostOrderByWithRelationInput[];
-  }): Promise<{ items: TradePost[]; total: number }> {
+  }): Promise<{ items: TradePostWithCategory[]; total: number }> {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.tradePost.findMany({
         where: params.where,
         orderBy: params.orderBy,
         skip: params.skip,
         take: params.take,
+        include: LIST_INCLUDE,
       }),
       this.prisma.tradePost.count({ where: params.where }),
     ]);
@@ -98,21 +108,27 @@ export class TradePostRepository {
   update(
     id: string,
     data: Prisma.TradePostUncheckedUpdateInput,
-  ): Promise<TradePost> {
-    return this.prisma.tradePost.update({ where: { id }, data });
-  }
-
-  softDelete(id: string): Promise<TradePost> {
+  ): Promise<TradePostWithCategory> {
     return this.prisma.tradePost.update({
       where: { id },
-      data: { deletedAt: new Date() },
+      data,
+      include: LIST_INCLUDE,
     });
   }
 
-  incrementViewCount(id: string): Promise<TradePost> {
+  softDelete(id: string): Promise<TradePostWithCategory> {
+    return this.prisma.tradePost.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+      include: LIST_INCLUDE,
+    });
+  }
+
+  incrementViewCount(id: string): Promise<TradePostWithCategory> {
     return this.prisma.tradePost.update({
       where: { id },
       data: { viewCount: { increment: 1 } },
+      include: LIST_INCLUDE,
     });
   }
 }

@@ -1,9 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type {
-  TradePostCategory,
   TradePostPriceType,
   TradePostStatus,
 } from '../../../../../generated/prisma';
+import { TradePostCategoryResponseDto } from '../../categories/dto/trade-post-category-response.dto';
 import type {
   TradePostEntity,
   TradePostImageView,
@@ -26,8 +26,13 @@ export class TradePostResponseDto {
   @ApiProperty() id: string;
   @ApiProperty() slug: string;
   @ApiProperty() ownerId: string;
-  @ApiProperty({ enum: ['PRODUCT', 'SERVICE', 'BUY_REQUEST', 'PROMOTION'] })
-  category: TradePostCategory;
+  @ApiProperty({
+    example: 'PRODUCT',
+    description: 'Public stable category code.',
+  })
+  category: string;
+  @ApiProperty({ type: () => TradePostCategoryResponseDto })
+  categoryInfo: TradePostCategoryResponseDto;
   @ApiProperty() title: string;
   @ApiProperty() summary: string;
   @ApiProperty() description: string;
@@ -79,6 +84,7 @@ export class TradePostResponseDto {
     dto.slug = entity.slug;
     dto.ownerId = entity.ownerId;
     dto.category = entity.category;
+    dto.categoryInfo = entity.categoryInfo;
     dto.title = entity.title;
     dto.summary = entity.summary;
     dto.description = entity.description;

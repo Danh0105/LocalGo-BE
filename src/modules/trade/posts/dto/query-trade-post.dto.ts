@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
@@ -7,20 +7,30 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Min,
 } from 'class-validator';
-import {
-  TradePostCategory,
-  TradePostStatus,
-} from '../../../../../generated/prisma';
+import { TradePostStatus } from '../../../../../generated/prisma';
 import { PaginationQueryDto } from '../../../../common/dto/pagination-query.dto';
+import {
+  TRADE_POST_CATEGORY_CODE_PATTERN,
+  normalizeTradePostCategoryCode,
+} from '../../categories/trade-post-category.constants';
 import { TRADE_POST_SORT_OPTIONS } from '../../trade.constants';
 
 export class QueryTradePostDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ enum: TradePostCategory })
+  @ApiPropertyOptional({
+    example: 'PRODUCT',
+    description:
+      'Mã danh mục ổn định. Public list trả TRADE_POST_CATEGORY_INVALID nếu code không tồn tại hoặc inactive.',
+  })
   @IsOptional()
-  @IsEnum(TradePostCategory)
-  category?: TradePostCategory;
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? normalizeTradePostCategoryCode(value) : value,
+  )
+  @IsString()
+  @Matches(TRADE_POST_CATEGORY_CODE_PATTERN)
+  category?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

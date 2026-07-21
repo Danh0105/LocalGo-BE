@@ -48,7 +48,7 @@ describe('RealZaloAuthProvider', () => {
     });
   });
 
-  it('sends the access token and secret_key header to the Zalo Graph API', async () => {
+  it('sends the access token and secret_key headers to the Zalo Graph API', async () => {
     const provider = new RealZaloAuthProvider(fakeConfigService('my-secret'));
     const fetchSpy = mockFetchOnce({
       ok: true,
@@ -62,9 +62,12 @@ describe('RealZaloAuthProvider', () => {
       RequestInit,
     ];
     expect(calledUrl.toString()).toBe(
-      'https://graph.zalo.me/v2.0/me?access_token=abc-token&fields=id%2Cname%2Cpicture',
+      'https://graph.zalo.me/v2.0/me?fields=id%2Cname%2Cpicture',
     );
-    expect(calledInit.headers).toMatchObject({ secret_key: 'my-secret' });
+    expect(calledInit.headers).toMatchObject({
+      access_token: 'abc-token',
+      secret_key: 'my-secret',
+    });
   });
 
   it('does not treat a success response as an error just because it carries error:0/message:"Success"', async () => {

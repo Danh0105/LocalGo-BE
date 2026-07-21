@@ -35,7 +35,8 @@ Sao chép `.env.example` thành `.env` (và `.env.test` cho môi trường test)
 | `PUBLIC_BASE_URL`                                 | Base URL công khai, dùng để build link ảnh upload                                                |
 | `CORS_ORIGINS`                                    | Danh sách origin được phép, phân tách bằng dấu phẩy                                              |
 | `MEDIA_STORAGE_PROVIDER`                          | `local` (mặc định) hoặc `s3` (chưa triển khai ở Phase 1)                                         |
-| `ZALO_AUTH_MODE`                                  | `mock` (dev, chấp nhận token dạng `mock:<zaloId>:<tên>`) hoặc `real` (chưa triển khai ở Phase 1) |
+| `ZALO_AUTH_MODE`                                  | `mock` (dev/test, chấp nhận token dạng `mock:<zaloId>:<tên>`) hoặc `real` (production, verify thật qua Zalo Graph API — bắt buộc `ZALO_APP_SECRET`) |
+| `ZALO_APP_SECRET`                                 | App Secret Key từ Zalo Developers — bắt buộc khi `ZALO_AUTH_MODE=real`, không cần cho mode mock  |
 | `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`         | Tài khoản admin được tạo khi chạy seed                                                           |
 
 Ứng dụng **fail-fast** nếu thiếu biến bắt buộc hoặc giá trị không hợp lệ (validate bằng Joi khi khởi động).
@@ -188,7 +189,7 @@ Toàn bộ endpoint có prefix `/api/v1`.
 | GET    | `/business-applications/me`                | Bearer | Any              | Hồ sơ BUSINESS mới nhất của tôi                           |
 | PATCH  | `/business-applications/:id`               | Bearer | Chủ hồ sơ        | Sửa và gửi lại hồ sơ đã bị từ chối                        |
 | GET    | `/admin/business-applications`             | Bearer | MODERATOR, ADMIN | Danh sách hồ sơ BUSINESS                                  |
-| POST   | `/admin/business-applications/:id/approve` | Bearer | MODERATOR, ADMIN | Duyệt và tạo tài khoản BUSINESS                           |
+| POST   | `/admin/business-applications/:id/approve` | Bearer | MODERATOR, ADMIN | Duyệt và nâng tài khoản Zalo đã nộp hồ sơ thành BUSINESS  |
 | POST   | `/admin/business-applications/:id/reject`  | Bearer | MODERATOR, ADMIN | Từ chối hồ sơ BUSINESS                                    |
 
 Tài liệu hồ sơ được trả bằng URL ký HMAC có thời hạn 5 phút. Media đã gắn với hồ sơ BUSINESS bị chặn tại static public route.

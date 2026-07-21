@@ -52,13 +52,15 @@ export class RealZaloAuthProvider implements ZaloAuthProvider {
     }
 
     const url = new URL(ZALO_GRAPH_ME_URL);
-    url.searchParams.set('access_token', accessToken);
     url.searchParams.set('fields', 'id,name,picture');
 
     let response: Response;
     try {
       response = await fetch(url, {
-        headers: { secret_key: this.appSecret },
+        headers: {
+          access_token: accessToken,
+          secret_key: this.appSecret,
+        },
       });
     } catch (error) {
       this.logger.error(

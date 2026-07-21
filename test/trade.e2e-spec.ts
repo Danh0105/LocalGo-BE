@@ -16,6 +16,7 @@ describe('Trade posts + reviews (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   const createdZaloIds: string[] = [];
+  const categoryCodePrefix = `E2E_${randomUUID().slice(0, 8).toUpperCase()}`;
 
   async function loginAsNewUser(label: string): Promise<AuthedUser> {
     const zaloId = `zalo-${label}-${randomUUID()}`;
@@ -54,6 +55,7 @@ describe('Trade posts + reviews (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (!app || !prisma) return;
     // Deletion order matters: TradeReview.userId and TradePost.ownerId are
     // both onDelete:Restrict (deliberately — see docs/erd.md), so child rows
     // must be cleared before the owning test users can be removed.
@@ -65,6 +67,9 @@ describe('Trade posts + reviews (e2e)', () => {
     await prisma.tradeReview.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.tradePost.deleteMany({ where: { ownerId: { in: userIds } } });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.tradePostCategory.deleteMany({
+      where: { code: { startsWith: categoryCodePrefix } },
+    });
     await app.close();
   });
 
@@ -204,6 +209,245 @@ describe('Trade posts + reviews (e2e)', () => {
         .set('Authorization', `Bearer ${business.accessToken}`)
         .send(validPostPayload)
         .expect(201);
+    });
+  });
+
+  describe('trade post categories', () => {
+    it('lists only active categories publicly without a token', async () => {
+      await prisma.tradePostCategory.createMany({
+        data: [
+          {
+            code: `${categoryCodePrefix}_PUBLIC_ACTIVE`,
+            name: 'Public Active',
+            sortOrder: 100,
+            isActive: true,
+          },
+          {
+            code: `${categoryCodePrefix}_PUBLIC_HIDDEN`,
+            name: 'Public Hidden',
+            sortOrder: 101,
+            isActive: false,
+          },
+        ],
+      });
+
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/trade-post-categories')
+        .expect(200);
+
+      const codes = response.body.data.map(
+        (category: { code: string }) => category.code,
+      );
+      expect(codes).toContain(`${categoryCodePrefix}_PUBLIC_ACTIVE`);
+      expect(codes).not.toContain(`${categoryCodePrefix}_PUBLIC_HIDDEN`);
+      expect(response.body.data[0]).toHaveProperty('requiresPromotionDetails');
+    });
+
+    it('allows ADMIN to create/update/reorder/hide categories with optimistic locking', async () => {
+      const user = await loginAsNewUser('category-user');
+      const admin = await loginAsNewUser('category-admin');
+      await promoteToAdmin(admin.userId);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/admin/trade-post-categories')
+        .set('Authorization', `Bearer ${user.accessToken}`)
+        .send({
+          code: `${categoryCodePrefix}_DENIED`,
+          name: 'Denied',
+        })
+        .expect(403);
+
+      const code = `${categoryCodePrefix}_CRUD`;
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/admin/trade-post-categories')
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({
+          code: code.toLowerCase(),
+          name: 'Danh mục CRUD',
+          description: 'Danh mục test',
+          sortOrder: 90,
+          requiresPromotionDetails: false,
+        })
+        .expect(201);
+      expect(created.body.data.code).toBe(code);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/admin/trade-post-categories')
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({ code: 'bad-code', name: 'Bad code' })
+        .expect(400);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/admin/trade-post-categories')
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({ code, name: 'Duplicate' })
+        .expect(409);
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/trade-post-categories/${created.body.data.id}`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({
+          code: `${categoryCodePrefix}_NEW_CODE`,
+          name: 'Should reject code',
+          sortOrder: 91,
+          requiresPromotionDetails: false,
+          version: created.body.data.version,
+        })
+        .expect(400);
+
+      const updated = await request(app.getHttpServer())
+        .patch(`/api/v1/admin/trade-post-categories/${created.body.data.id}`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({
+          name: 'Danh mục đã sửa',
+          description: null,
+          sortOrder: 91,
+          requiresPromotionDetails: true,
+          version: created.body.data.version,
+        })
+        .expect(200);
+      expect(updated.body.data.version).toBe(created.body.data.version + 1);
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/trade-post-categories/${created.body.data.id}`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({
+          name: 'Stale',
+          sortOrder: 92,
+          requiresPromotionDetails: false,
+          version: created.body.data.version,
+        })
+        .expect(409);
+
+      await request(app.getHttpServer())
+        .patch('/api/v1/admin/trade-post-categories/reorder')
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({
+          items: [
+            {
+              id: updated.body.data.id,
+              sortOrder: 88,
+              version: updated.body.data.version,
+            },
+            {
+              id: randomUUID(),
+              sortOrder: 89,
+            },
+          ],
+        })
+        .expect(404);
+      const afterFailedReorder =
+        await prisma.tradePostCategory.findUniqueOrThrow({
+          where: { id: updated.body.data.id },
+        });
+      expect(afterFailedReorder.sortOrder).toBe(91);
+
+      const hidden = await request(app.getHttpServer())
+        .patch(
+          `/api/v1/admin/trade-post-categories/${updated.body.data.id}/status`,
+        )
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({ isActive: false, version: updated.body.data.version })
+        .expect(200);
+      expect(hidden.body.data.isActive).toBe(false);
+    });
+
+    it('creates and filters trade posts by category code from DB', async () => {
+      const owner = await loginAsNewUser('category-post-owner');
+      await promoteToBusiness(owner.userId);
+      const code = `${categoryCodePrefix}_POST`;
+      await prisma.tradePostCategory.create({
+        data: {
+          code,
+          name: 'Danh mục đăng tin',
+          sortOrder: 102,
+          isActive: true,
+        },
+      });
+
+      const createRes = await request(app.getHttpServer())
+        .post('/api/v1/trade-posts')
+        .set('Authorization', `Bearer ${owner.accessToken}`)
+        .send({ ...validPostPayload, category: code })
+        .expect(201);
+      expect(createRes.body.data.category).toBe(code);
+      expect(createRes.body.data.categoryInfo.name).toBe('Danh mục đăng tin');
+
+      const admin = await loginAsNewUser('category-post-admin');
+      await promoteToAdmin(admin.userId);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/trade-posts/${createRes.body.data.id}/submit`)
+        .set('Authorization', `Bearer ${owner.accessToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/trade-posts/${createRes.body.data.id}/approve`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(200);
+
+      const listRes = await request(app.getHttpServer())
+        .get('/api/v1/trade-posts')
+        .query({ category: code })
+        .expect(200);
+      expect(
+        listRes.body.data.map((post: { id: string }) => post.id),
+      ).toContain(createRes.body.data.id);
+
+      await request(app.getHttpServer())
+        .get('/api/v1/trade-posts')
+        .query({ category: `${categoryCodePrefix}_UNKNOWN` })
+        .expect(400);
+    });
+
+    it('rejects inactive categories publicly and prevents deleting a category in use', async () => {
+      const owner = await loginAsNewUser('inactive-category-owner');
+      await promoteToBusiness(owner.userId);
+      const admin = await loginAsNewUser('inactive-category-admin');
+      await promoteToAdmin(admin.userId);
+      const category = await prisma.tradePostCategory.create({
+        data: {
+          code: `${categoryCodePrefix}_IN_USE`,
+          name: 'Category In Use',
+          sortOrder: 103,
+          isActive: true,
+        },
+      });
+      const createRes = await request(app.getHttpServer())
+        .post('/api/v1/trade-posts')
+        .set('Authorization', `Bearer ${owner.accessToken}`)
+        .send({ ...validPostPayload, category: category.code })
+        .expect(201);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/trade-posts/${createRes.body.data.id}/submit`)
+        .set('Authorization', `Bearer ${owner.accessToken}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/trade-posts/${createRes.body.data.id}/approve`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .delete(`/api/v1/admin/trade-post-categories/${category.id}`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(409);
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/trade-post-categories/${category.id}/status`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({ isActive: false, version: category.version })
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get(`/api/v1/trade-posts/${createRes.body.data.id}`)
+        .expect(404);
+      await request(app.getHttpServer())
+        .get('/api/v1/trade-posts')
+        .query({ category: category.code })
+        .expect(400);
+      await request(app.getHttpServer())
+        .get('/api/v1/trade-posts/me')
+        .query({ category: category.code })
+        .set('Authorization', `Bearer ${owner.accessToken}`)
+        .expect(200);
     });
   });
 

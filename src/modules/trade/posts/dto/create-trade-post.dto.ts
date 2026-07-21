@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -16,16 +17,25 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import { TradePostPriceType } from '../../../../../generated/prisma';
 import {
-  TradePostCategory,
-  TradePostPriceType,
-} from '../../../../../generated/prisma';
+  TRADE_POST_CATEGORY_CODE_PATTERN,
+  normalizeTradePostCategoryCode,
+} from '../../categories/trade-post-category.constants';
 import { MAX_TRADE_POST_IMAGES } from '../../trade.constants';
 
 export class CreateTradePostDto {
-  @ApiProperty({ enum: TradePostCategory })
-  @IsEnum(TradePostCategory)
-  category: TradePostCategory;
+  @ApiProperty({
+    example: 'PRODUCT',
+    description:
+      'Mã danh mục ổn định từ GET /trade-post-categories; `id` danh mục là internal.',
+  })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? normalizeTradePostCategoryCode(value) : value,
+  )
+  @IsString()
+  @Matches(TRADE_POST_CATEGORY_CODE_PATTERN)
+  category: string;
 
   @ApiProperty()
   @IsString()
@@ -105,17 +115,17 @@ export class CreateTradePostDto {
   @IsInt()
   @Min(1)
   @Max(100)
-  promotionPercent?: number;
+  promotionPercent?: number | null;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsDateString()
-  promotionStartAt?: string;
+  promotionStartAt?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsDateString()
-  promotionEndAt?: string;
+  promotionEndAt?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()

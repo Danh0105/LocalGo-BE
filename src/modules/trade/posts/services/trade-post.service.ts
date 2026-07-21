@@ -16,6 +16,7 @@ import { slugify } from '../../../../common/utils/slugify.util';
 import { PrismaService } from '../../../../database/prisma.service';
 import { MediaService } from '../../../media/services/media.service';
 import type { AuthenticatedUser } from '../../../auth/types/authenticated-user.interface';
+import { TradePostCategoryService } from '../../categories/services/trade-post-category.service';
 import type { TradePostSortOption } from '../../trade.constants';
 import { CreateTradePostDto } from '../dto/create-trade-post.dto';
 import { QueryTradePostDto } from '../dto/query-trade-post.dto';
@@ -30,6 +31,7 @@ export class TradePostService {
     private readonly tradePostRepository: TradePostRepository,
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly categoryService: TradePostCategoryService,
   ) {}
 
   async create(
@@ -43,8 +45,12 @@ export class TradePostService {
         HttpStatus.FORBIDDEN,
       );
     }
+    const category = await this.categoryService.findActiveByCodeOrThrow(
+      dto.category,
+    );
     assertValidTradePostState({
-      category: dto.category,
+      categoryCode: category.code,
+      requiresPromotionDetails: category.requiresPromotionDetails,
       priceType: dto.priceType,
       price: dto.price,
       promotionPercent: dto.promotionPercent,
@@ -76,7 +82,7 @@ export class TradePostService {
         data: {
           slug,
           ownerId,
-          category: dto.category,
+          categoryId: category.id,
           title: dto.title,
           summary: dto.summary,
           description: dto.description,
@@ -143,8 +149,14 @@ export class TradePostService {
       );
     }
 
+    const finalCategory =
+      dto.category !== undefined
+        ? await this.categoryService.findActiveByCodeOrThrow(dto.category)
+        : existing.category;
+
     assertValidTradePostState({
-      category: dto.category ?? existing.category,
+      categoryCode: finalCategory.code,
+      requiresPromotionDetails: finalCategory.requiresPromotionDetails,
       priceType: dto.priceType ?? existing.priceType,
       price: dto.price !== undefined ? dto.price : existing.price,
       promotionPercent:
@@ -166,7 +178,8 @@ export class TradePostService {
       (dto.title !== undefined && dto.title !== existing.title) ||
       (dto.description !== undefined &&
         dto.description !== existing.description) ||
-      (dto.category !== undefined && dto.category !== existing.category) ||
+      (dto.category !== undefined &&
+        finalCategory.code !== existing.category.code) ||
       (dto.priceType !== undefined && dto.priceType !== existing.priceType) ||
       (dto.price !== undefined && dto.price !== existingPriceNumber);
 
@@ -221,7 +234,9 @@ export class TradePostService {
       return tx.tradePost.update({
         where: { id },
         data: {
-          ...(dto.category !== undefined ? { category: dto.category } : {}),
+          ...(dto.category !== undefined
+            ? { categoryId: finalCategory.id }
+            : {}),
           ...(dto.title !== undefined ? { title: dto.title } : {}),
           ...(dto.summary !== undefined ? { summary: dto.summary } : {}),
           ...(dto.description !== undefined
@@ -248,10 +263,18 @@ export class TradePostService {
             ? { promotionPercent: dto.promotionPercent }
             : {}),
           ...(dto.promotionStartAt !== undefined
-            ? { promotionStartAt: new Date(dto.promotionStartAt) }
+            ? {
+                promotionStartAt: dto.promotionStartAt
+                  ? new Date(dto.promotionStartAt)
+                  : null,
+              }
             : {}),
           ...(dto.promotionEndAt !== undefined
-            ? { promotionEndAt: new Date(dto.promotionEndAt) }
+            ? {
+                promotionEndAt: dto.promotionEndAt
+                  ? new Date(dto.promotionEndAt)
+                  : null,
+              }
             : {}),
           ...(dto.expiresAt !== undefined
             ? { expiresAt: new Date(dto.expiresAt) }
@@ -289,6 +312,8 @@ export class TradePostService {
     if (
       !post ||
       post.status !== TradePostStatus.PUBLISHED ||
+      !post.category.isActive ||
+      post.category.deletedAt !== null ||
       (post.expiresAt && post.expiresAt.getTime() <= Date.now())
     ) {
       throw new AppException(
@@ -320,9 +345,10 @@ export class TradePostService {
   async listPublic(
     query: QueryTradePostDto,
   ): Promise<PaginatedResultDto<TradePostEntity>> {
-    const conditions = this.buildCommonFilters(query);
+    const conditions = await this.buildCommonFilters(query, true);
     conditions.push({ deletedAt: null });
     conditions.push({ status: TradePostStatus.PUBLISHED });
+    conditions.push({ category: { isActive: true, deletedAt: null } });
     conditions.push({
       OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     });
@@ -334,7 +360,7 @@ export class TradePostService {
     ownerId: string,
     query: QueryTradePostDto,
   ): Promise<PaginatedResultDto<TradePostEntity>> {
-    const conditions = this.buildCommonFilters(query);
+    const conditions = await this.buildCommonFilters(query, false);
     conditions.push({ deletedAt: null });
     conditions.push({ ownerId });
     if (query.status) {
@@ -347,7 +373,7 @@ export class TradePostService {
   async listForAdmin(
     query: QueryTradePostDto,
   ): Promise<PaginatedResultDto<TradePostEntity>> {
-    const conditions = this.buildCommonFilters(query);
+    const conditions = await this.buildCommonFilters(query, false);
     conditions.push({ deletedAt: null });
     if (query.status) {
       conditions.push({ status: query.status });
@@ -387,12 +413,17 @@ export class TradePostService {
     );
   }
 
-  private buildCommonFilters(
+  private async buildCommonFilters(
     query: QueryTradePostDto,
-  ): Prisma.TradePostWhereInput[] {
+    activeCategoryOnly: boolean,
+  ): Promise<Prisma.TradePostWhereInput[]> {
     const conditions: Prisma.TradePostWhereInput[] = [];
     if (query.category) {
-      conditions.push({ category: query.category });
+      const category = await this.categoryService.findVisibleByCodeOrThrow(
+        query.category,
+        activeCategoryOnly,
+      );
+      conditions.push({ categoryId: category.id });
     }
     if (query.featured !== undefined) {
       conditions.push({ featured: query.featured });

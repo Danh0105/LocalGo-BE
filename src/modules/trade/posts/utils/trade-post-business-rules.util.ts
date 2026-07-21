@@ -1,14 +1,11 @@
 import { HttpStatus } from '@nestjs/common';
-import {
-  Prisma,
-  TradePostCategory,
-  TradePostPriceType,
-} from '../../../../../generated/prisma';
+import { Prisma, TradePostPriceType } from '../../../../../generated/prisma';
 import { ErrorCode } from '../../../../common/constants/error-codes.constant';
 import { AppException } from '../../../../common/exceptions/app.exception';
 
 export interface TradePostStateInput {
-  category: TradePostCategory;
+  categoryCode: string;
+  requiresPromotionDetails: boolean;
   priceType: TradePostPriceType;
   price?: number | Prisma.Decimal | null;
   promotionPercent?: number | null;
@@ -19,8 +16,9 @@ export interface TradePostStateInput {
 /**
  * Validates the *resulting* state of a trade post (after merging any patch
  * onto the current row for updates) against the spec's cross-field rules:
- * FIXED price type requires a positive price; PROMOTION category requires
- * all three promotion fields together and only PROMOTION may set them;
+ * FIXED price type requires a positive price; categories flagged with
+ * requiresPromotionDetails need all three promotion fields and other
+ * categories may not set them;
  * promotion start must precede its end.
  */
 export function assertValidTradePostState(input: TradePostStateInput): void {
@@ -41,7 +39,7 @@ export function assertValidTradePostState(input: TradePostStateInput): void {
     input.promotionStartAt != null ||
     input.promotionEndAt != null;
 
-  if (input.category === TradePostCategory.PROMOTION) {
+  if (input.requiresPromotionDetails) {
     if (
       input.promotionPercent == null ||
       input.promotionStartAt == null ||
@@ -49,14 +47,14 @@ export function assertValidTradePostState(input: TradePostStateInput): void {
     ) {
       throw new AppException(
         ErrorCode.VALIDATION_ERROR,
-        'Tin khuyến mãi (PROMOTION) bắt buộc phải có promotionPercent, promotionStartAt và promotionEndAt',
+        `Tin thuộc danh mục ${input.categoryCode} bắt buộc phải có promotionPercent, promotionStartAt và promotionEndAt`,
         HttpStatus.BAD_REQUEST,
       );
     }
   } else if (hasPromotionInfo) {
     throw new AppException(
       ErrorCode.VALIDATION_ERROR,
-      'Chỉ tin thuộc danh mục khuyến mãi (PROMOTION) mới được có thông tin khuyến mãi',
+      'Danh mục này không được có thông tin khuyến mãi',
       HttpStatus.BAD_REQUEST,
     );
   }

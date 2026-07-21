@@ -10,6 +10,7 @@ import type {
   UserRole,
   UserStatus,
 } from '../../../../../generated/prisma';
+import type { TradePostCategoryInfoView } from '../../categories/entities/trade-post-category.entity';
 
 export interface TradePostImageView {
   id: string;
@@ -19,6 +20,7 @@ export interface TradePostImageView {
 }
 
 export type TradePostWithImages = TradePost & {
+  category: TradePostCategory;
   images: (TradePostImage & { media: Media })[];
 };
 
@@ -33,6 +35,7 @@ export interface TradePostOwnerView {
 }
 
 export type TradePostWithOwner = TradePost & {
+  category: TradePostCategory;
   owner: Pick<
     User,
     'id' | 'displayName' | 'email' | 'phone' | 'avatarUrl' | 'role' | 'status'
@@ -41,6 +44,10 @@ export type TradePostWithOwner = TradePost & {
 
 export type TradePostWithImagesAndOwner = TradePostWithImages &
   TradePostWithOwner;
+
+export type TradePostWithCategory = TradePost & {
+  category: TradePostCategory;
+};
 
 /**
  * Domain-shape mapper: DB row -> safe internal object. `images` is only
@@ -53,7 +60,9 @@ export class TradePostEntity {
   id: string;
   slug: string;
   ownerId: string;
-  category: TradePostCategory;
+  category: string;
+  categoryId: string;
+  categoryInfo: TradePostCategoryInfoView;
   title: string;
   summary: string;
   description: string;
@@ -87,7 +96,7 @@ export class TradePostEntity {
 
   constructor(
     post:
-      | TradePost
+      | TradePostWithCategory
       | TradePostWithImages
       | TradePostWithOwner
       | TradePostWithImagesAndOwner,
@@ -95,7 +104,21 @@ export class TradePostEntity {
     this.id = post.id;
     this.slug = post.slug;
     this.ownerId = post.ownerId;
-    this.category = post.category;
+    this.categoryId = post.categoryId;
+    if (!('category' in post)) {
+      throw new Error(
+        'TradePostEntity requires category relation to be loaded',
+      );
+    }
+    this.category = post.category.code;
+    this.categoryInfo = {
+      id: post.category.id,
+      code: post.category.code,
+      name: post.category.name,
+      description: post.category.description,
+      sortOrder: post.category.sortOrder,
+      requiresPromotionDetails: post.category.requiresPromotionDetails,
+    };
     this.title = post.title;
     this.summary = post.summary;
     this.description = post.description;

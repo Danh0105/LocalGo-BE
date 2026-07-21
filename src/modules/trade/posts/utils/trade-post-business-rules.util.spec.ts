@@ -1,7 +1,4 @@
-import {
-  TradePostCategory,
-  TradePostPriceType,
-} from '../../../../../generated/prisma';
+import { TradePostPriceType } from '../../../../../generated/prisma';
 import { AppException } from '../../../../common/exceptions/app.exception';
 import { assertValidTradePostState } from './trade-post-business-rules.util';
 
@@ -9,7 +6,8 @@ describe('assertValidTradePostState', () => {
   it('rejects FIXED price type without a price', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.PRODUCT,
+        categoryCode: 'PRODUCT',
+        requiresPromotionDetails: false,
         priceType: TradePostPriceType.FIXED,
         price: null,
       }),
@@ -19,7 +17,8 @@ describe('assertValidTradePostState', () => {
   it('rejects FIXED price type with a zero price', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.PRODUCT,
+        categoryCode: 'PRODUCT',
+        requiresPromotionDetails: false,
         priceType: TradePostPriceType.FIXED,
         price: 0,
       }),
@@ -29,7 +28,8 @@ describe('assertValidTradePostState', () => {
   it('accepts FIXED price type with a positive price', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.PRODUCT,
+        categoryCode: 'PRODUCT',
+        requiresPromotionDetails: false,
         priceType: TradePostPriceType.FIXED,
         price: 150000,
       }),
@@ -39,7 +39,8 @@ describe('assertValidTradePostState', () => {
   it('accepts NEGOTIABLE price type without a price', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.PRODUCT,
+        categoryCode: 'PRODUCT',
+        requiresPromotionDetails: false,
         priceType: TradePostPriceType.NEGOTIABLE,
         price: null,
       }),
@@ -49,7 +50,8 @@ describe('assertValidTradePostState', () => {
   it('accepts CONTACT price type without a price', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.SERVICE,
+        categoryCode: 'SERVICE',
+        requiresPromotionDetails: false,
         priceType: TradePostPriceType.CONTACT,
         price: null,
       }),
@@ -59,7 +61,8 @@ describe('assertValidTradePostState', () => {
   it('rejects PROMOTION category missing promotion fields', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.PROMOTION,
+        categoryCode: 'PROMOTION',
+        requiresPromotionDetails: true,
         priceType: TradePostPriceType.CONTACT,
       }),
     ).toThrow(AppException);
@@ -68,7 +71,8 @@ describe('assertValidTradePostState', () => {
   it('accepts PROMOTION category with all promotion fields and a valid date range', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.PROMOTION,
+        categoryCode: 'PROMOTION',
+        requiresPromotionDetails: true,
         priceType: TradePostPriceType.CONTACT,
         promotionPercent: 20,
         promotionStartAt: '2026-08-01T00:00:00.000Z',
@@ -80,7 +84,8 @@ describe('assertValidTradePostState', () => {
   it('rejects non-PROMOTION category carrying promotion fields', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.PRODUCT,
+        categoryCode: 'PRODUCT',
+        requiresPromotionDetails: false,
         priceType: TradePostPriceType.CONTACT,
         promotionPercent: 10,
       }),
@@ -90,7 +95,8 @@ describe('assertValidTradePostState', () => {
   it('rejects promotionStartAt >= promotionEndAt', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.PROMOTION,
+        categoryCode: 'PROMOTION',
+        requiresPromotionDetails: true,
         priceType: TradePostPriceType.CONTACT,
         promotionPercent: 15,
         promotionStartAt: '2026-08-31T00:00:00.000Z',
@@ -102,7 +108,8 @@ describe('assertValidTradePostState', () => {
   it('rejects promotionStartAt equal to promotionEndAt', () => {
     expect(() =>
       assertValidTradePostState({
-        category: TradePostCategory.PROMOTION,
+        categoryCode: 'PROMOTION',
+        requiresPromotionDetails: true,
         priceType: TradePostPriceType.CONTACT,
         promotionPercent: 15,
         promotionStartAt: '2026-08-01T00:00:00.000Z',

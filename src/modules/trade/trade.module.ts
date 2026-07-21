@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 import { MediaModule } from '../media/media.module';
+import { TradePostCategoriesAdminController } from './categories/controllers/trade-post-categories-admin.controller';
+import { TradePostCategoriesController } from './categories/controllers/trade-post-categories.controller';
+import { TradePostCategoryRepository } from './categories/repositories/trade-post-category.repository';
+import { TradePostCategoryService } from './categories/services/trade-post-category.service';
 import { TradePostsAdminController } from './posts/controllers/trade-posts-admin.controller';
 import { TradePostsController } from './posts/controllers/trade-posts.controller';
 import { TradePostRepository } from './posts/repositories/trade-post.repository';
@@ -15,6 +19,8 @@ import { TradeReviewService } from './reviews/services/trade-review.service';
 @Module({
   imports: [MediaModule],
   controllers: [
+    TradePostCategoriesController,
+    TradePostCategoriesAdminController,
     TradePostsController,
     TradePostsAdminController,
     TradeReviewsController,
@@ -22,6 +28,8 @@ import { TradeReviewService } from './reviews/services/trade-review.service';
     ReviewsAdminController,
   ],
   providers: [
+    TradePostCategoryRepository,
+    TradePostCategoryService,
     TradePostRepository,
     TradePostService,
     TradePostStatusService,
@@ -29,6 +37,11 @@ import { TradeReviewService } from './reviews/services/trade-review.service';
     TradeReviewService,
     TradeRatingService,
   ],
-  exports: [TradePostService, TradePostStatusService, TradeReviewService],
+  exports: [
+    TradePostCategoryService,
+    TradePostService,
+    TradePostStatusService,
+    TradeReviewService,
+  ],
 })
 export class TradeModule {}

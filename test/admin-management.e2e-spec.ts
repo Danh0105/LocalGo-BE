@@ -6,7 +6,6 @@ import {
   BusinessApplicantType,
   BusinessApplicationStatus,
   BusinessDocumentType,
-  TradePostCategory,
   TradePostPriceType,
   TradePostStatus,
   UserRole,
@@ -38,6 +37,21 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
     return { id: user.id, token: response.body.data.accessToken as string };
   }
 
+  async function getTradePostCategoryId(code: string): Promise<string> {
+    const category = await prisma.tradePostCategory.upsert({
+      where: { code },
+      update: {},
+      create: {
+        code,
+        name: code,
+        sortOrder: 0,
+        isActive: true,
+        requiresPromotionDetails: code === 'PROMOTION',
+      },
+    });
+    return category.id;
+  }
+
   async function createApplication(suffix: string, submittedById: string) {
     const application = await prisma.businessApplication.create({
       data: {
@@ -66,6 +80,7 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (!app || !prisma) return;
     await prisma.tradePost.deleteMany({ where: { id: { in: tradePostIds } } });
     await prisma.businessApplicationDocument.deleteMany({
       where: { applicationId: { in: applicationIds } },
@@ -267,46 +282,47 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
     expect(response.body.error.code).toBe('APPLICATION_NOT_FOUND');
   });
 
-  it('approves an application, creates one BUSINESS user and links createdUserId', async () => {
+  it('approves an application, promotes the submitting Zalo user and links createdUserId', async () => {
     const admin = await login('approve-admin', UserRole.ADMIN);
     const owner = await login('approve-owner');
     const application = await createApplication('approve', owner.id);
-    const email = `${marker}-approved@example.com`;
     const response = await request(app.getHttpServer())
       .post(`/api/v1/admin/business-applications/${application.id}/approve`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({
-        displayName: 'Approved Business',
-        email,
-        initialPassword: 'Temporary@123',
-      })
+      .send({})
       .expect(201);
-    const created = await prisma.user.findUniqueOrThrow({ where: { email } });
-    userIds.push(created.id);
-    expect(created.role).toBe(UserRole.BUSINESS);
-    expect(response.body.data.createdUserId).toBe(created.id);
+    const promoted = await prisma.user.findUniqueOrThrow({
+      where: { id: owner.id },
+    });
+    expect(promoted).toMatchObject({
+      role: UserRole.BUSINESS,
+      email: application.contactEmail.toLowerCase(),
+      phone: application.contactPhone,
+    });
+    expect(promoted.passwordHash).toBeNull();
+    expect(response.body.data.createdUserId).toBe(owner.id);
   });
 
   it('allows only one of two concurrent approve requests to succeed', async () => {
     const admin = await login('concurrent-admin', UserRole.ADMIN);
     const owner = await login('concurrent-owner');
     const application = await createApplication('concurrent', owner.id);
-    const email = `${marker}-concurrent@example.com`;
     const calls = [1, 2].map(() =>
       request(app.getHttpServer())
         .post(`/api/v1/admin/business-applications/${application.id}/approve`)
         .set('Authorization', `Bearer ${admin.token}`)
-        .send({
-          displayName: 'Concurrent Business',
-          email,
-          initialPassword: 'Temporary@123',
-        }),
+        .send({}),
     );
     const responses = await Promise.all(calls);
     expect(responses.map((item) => item.status).sort()).toEqual([201, 409]);
-    const users = await prisma.user.findMany({ where: { email } });
-    expect(users).toHaveLength(1);
-    userIds.push(users[0].id);
+    const promoted = await prisma.user.findUniqueOrThrow({
+      where: { id: owner.id },
+    });
+    expect(promoted.role).toBe(UserRole.BUSINESS);
+    const reviewed = await prisma.businessApplication.findUniqueOrThrow({
+      where: { id: application.id },
+    });
+    expect(reviewed.createdUserId).toBe(owner.id);
   });
 
   it('requires a valid rejection reason', async () => {
@@ -362,14 +378,14 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
       data: { email: takenEmail },
     });
     const application = await createApplication('email-conflict', owner.id);
+    await prisma.businessApplication.update({
+      where: { id: application.id },
+      data: { contactEmail: takenEmail },
+    });
     const response = await request(app.getHttpServer())
       .post(`/api/v1/admin/business-applications/${application.id}/approve`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({
-        displayName: 'Email Conflict Business',
-        email: takenEmail,
-        initialPassword: 'Temporary@123',
-      })
+      .send({})
       .expect(409);
     expect(response.body.error.code).toBe('EMAIL_ALREADY_EXISTS');
     const stillPending = await prisma.businessApplication.findUniqueOrThrow({
@@ -392,22 +408,19 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
       where: { id: existing.id },
       data: { phone: application.contactPhone },
     });
-    const email = `${marker}-phone-conflict@example.com`;
     const response = await request(app.getHttpServer())
       .post(`/api/v1/admin/business-applications/${application.id}/approve`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({
-        displayName: 'Phone Conflict Business',
-        email,
-        initialPassword: 'Temporary@123',
-      })
+      .send({})
       .expect(409);
     expect(response.body.error.code).toBe('PHONE_ALREADY_EXISTS');
     const stillPending = await prisma.businessApplication.findUniqueOrThrow({
       where: { id: application.id },
     });
     expect(stillPending.status).toBe(BusinessApplicationStatus.PENDING);
-    const usersWithEmail = await prisma.user.count({ where: { email } });
+    const usersWithEmail = await prisma.user.count({
+      where: { email: application.contactEmail },
+    });
     expect(usersWithEmail).toBe(0);
   });
 
@@ -415,27 +428,20 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
     const admin = await login('double-review-admin', UserRole.ADMIN);
     const owner = await login('double-review-owner');
     const application = await createApplication('double-review', owner.id);
-    const email = `${marker}-double-review@example.com`;
     await request(app.getHttpServer())
       .post(`/api/v1/admin/business-applications/${application.id}/approve`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({
-        displayName: 'Double Review Business',
-        email,
-        initialPassword: 'Temporary@123',
-      })
+      .send({})
       .expect(201);
-    const created = await prisma.user.findUniqueOrThrow({ where: { email } });
-    userIds.push(created.id);
+    const promoted = await prisma.user.findUniqueOrThrow({
+      where: { id: owner.id },
+    });
+    expect(promoted.role).toBe(UserRole.BUSINESS);
 
     const secondApprove = await request(app.getHttpServer())
       .post(`/api/v1/admin/business-applications/${application.id}/approve`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({
-        displayName: 'Double Review Business 2',
-        email: `${marker}-double-review-2@example.com`,
-        initialPassword: 'Temporary@123',
-      })
+      .send({})
       .expect(409);
     expect(secondApprove.body.error.code).toBe('APPLICATION_ALREADY_REVIEWED');
 
@@ -469,11 +475,7 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
     const approveAfterReject = await request(app.getHttpServer())
       .post(`/api/v1/admin/business-applications/${application.id}/approve`)
       .set('Authorization', `Bearer ${admin.token}`)
-      .send({
-        displayName: 'Double Reject Business',
-        email: `${marker}-double-reject@example.com`,
-        initialPassword: 'Temporary@123',
-      })
+      .send({})
       .expect(409);
     expect(approveAfterReject.body.error.code).toBe(
       'APPLICATION_ALREADY_REVIEWED',
@@ -572,11 +574,12 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
   it('returns owner on admin trade-post list/detail without sensitive fields', async () => {
     const admin = await login('trade-admin', UserRole.ADMIN);
     const owner = await login('trade-owner');
+    const categoryId = await getTradePostCategoryId('PRODUCT');
     const post = await prisma.tradePost.create({
       data: {
         slug: `owner-${marker}`,
         ownerId: owner.id,
-        category: TradePostCategory.PRODUCT,
+        categoryId,
         title: `Owner response ${marker}`,
         summary: 'Summary',
         description: 'Description',
@@ -607,11 +610,12 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
   it('allows an admin to hide, show again, and soft-delete an approved trade post', async () => {
     const admin = await login('hide-delete-admin', UserRole.ADMIN);
     const owner = await login('hide-delete-owner');
+    const categoryId = await getTradePostCategoryId('PRODUCT');
     const post = await prisma.tradePost.create({
       data: {
         slug: `hide-delete-${marker}`,
         ownerId: owner.id,
-        category: TradePostCategory.PRODUCT,
+        categoryId,
         title: `Hide delete ${marker}`,
         summary: 'Summary',
         description: 'Description',
