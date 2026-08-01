@@ -14,6 +14,7 @@ import type { MediaConfig } from './config/media.config';
 import { RequestContextService } from './common/context/request-context.service';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { createValidationException } from './common/validation/validation-exception.factory';
 import { PrismaService } from './database/prisma.service';
 
 async function bootstrap(): Promise<void> {
@@ -80,6 +81,7 @@ async function bootstrap(): Promise<void> {
       transformOptions: {
         enableImplicitConversion: false,
       },
+      exceptionFactory: createValidationException,
     }),
   );
 

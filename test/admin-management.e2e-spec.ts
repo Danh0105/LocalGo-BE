@@ -607,6 +607,110 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
     expect(detail.body.data.owner.id).toBe(owner.id);
   });
 
+  it('returns an empty admin trade-post list with newest sort and pagination meta', async () => {
+    const admin = await login('trade-empty-admin', UserRole.ADMIN);
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/trade-posts')
+      .query({
+        page: 1,
+        limit: 20,
+        sortBy: 'newest',
+        ownerId: randomUUID(),
+      })
+      .set('Authorization', `Bearer ${admin.token}`)
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      success: true,
+      data: [],
+      meta: {
+        page: 1,
+        limit: 20,
+        total: 0,
+        totalPages: 0,
+      },
+    });
+  });
+
+  it('returns admin trade-post rows with owner and category info using newest sort', async () => {
+    const admin = await login('trade-newest-admin', UserRole.ADMIN);
+    const owner = await login('trade-newest-owner');
+    const categoryId = await getTradePostCategoryId('PRODUCT');
+    const oldPost = await prisma.tradePost.create({
+      data: {
+        slug: `newest-old-${marker}`,
+        ownerId: owner.id,
+        categoryId,
+        title: `Newest old ${marker}`,
+        summary: 'Summary',
+        description: 'Description',
+        priceType: TradePostPriceType.CONTACT,
+        address: 'Tây Ninh',
+        contactName: 'Liên hệ',
+        contactPhone: '0901234567',
+        publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    });
+    const newPost = await prisma.tradePost.create({
+      data: {
+        slug: `newest-new-${marker}`,
+        ownerId: owner.id,
+        categoryId,
+        title: `Newest new ${marker}`,
+        summary: 'Summary',
+        description: 'Description',
+        priceType: TradePostPriceType.CONTACT,
+        address: 'Tây Ninh',
+        contactName: 'Liên hệ',
+        contactPhone: '0901234567',
+        publishedAt: new Date('2026-02-01T00:00:00.000Z'),
+      },
+    });
+    tradePostIds.push(oldPost.id, newPost.id);
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/admin/trade-posts')
+      .query({ page: 1, limit: 20, sortBy: 'newest', ownerId: owner.id })
+      .set('Authorization', `Bearer ${admin.token}`)
+      .expect(200);
+
+    expect(response.body.success).toBe(true);
+    expect(response.body.meta).toMatchObject({
+      page: 1,
+      limit: 20,
+      total: 2,
+      totalPages: 1,
+    });
+    const posts = response.body.data as Array<{ id: string }>;
+    expect(posts.map((post) => post.id)).toEqual([newPost.id, oldPost.id]);
+    expect(response.body.data[0]).toMatchObject({
+      id: newPost.id,
+      slug: `newest-new-${marker}`,
+      ownerId: owner.id,
+      owner: {
+        id: owner.id,
+        displayName: 'trade-newest-owner',
+        role: UserRole.USER,
+        status: UserStatus.ACTIVE,
+      },
+      category: 'PRODUCT',
+      categoryInfo: {
+        id: categoryId,
+        code: 'PRODUCT',
+      },
+      title: `Newest new ${marker}`,
+      summary: 'Summary',
+      description: 'Description',
+      priceType: TradePostPriceType.CONTACT,
+      price: null,
+      priceLabel: null,
+      address: 'Tây Ninh',
+      status: TradePostStatus.DRAFT,
+      featured: false,
+    });
+    expect(response.body.data[0].owner).not.toHaveProperty('passwordHash');
+  });
+
   it('allows an admin to hide, show again, and soft-delete an approved trade post', async () => {
     const admin = await login('hide-delete-admin', UserRole.ADMIN);
     const owner = await login('hide-delete-owner');

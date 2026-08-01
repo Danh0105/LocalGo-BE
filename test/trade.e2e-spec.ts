@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { UserRole } from '../generated/prisma';
+import { slugify } from '../src/common/utils/slugify.util';
 import { PrismaService } from '../src/database/prisma.service';
 import { createTestApp } from './utils/create-test-app';
 
@@ -68,7 +69,12 @@ describe('Trade posts + reviews (e2e)', () => {
     await prisma.tradePost.deleteMany({ where: { ownerId: { in: userIds } } });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.tradePostCategory.deleteMany({
-      where: { code: { startsWith: categoryCodePrefix } },
+      where: {
+        OR: [
+          { code: { startsWith: categoryCodePrefix } },
+          { name: { contains: categoryCodePrefix } },
+        ],
+      },
     });
     await app.close();
   });
@@ -235,9 +241,8 @@ describe('Trade posts + reviews (e2e)', () => {
         .get('/api/v1/trade-post-categories')
         .expect(200);
 
-      const codes = response.body.data.map(
-        (category: { code: string }) => category.code,
-      );
+      const categories = response.body.data as Array<{ code: string }>;
+      const codes = categories.map((category) => category.code);
       expect(codes).toContain(`${categoryCodePrefix}_PUBLIC_ACTIVE`);
       expect(codes).not.toContain(`${categoryCodePrefix}_PUBLIC_HIDDEN`);
       expect(response.body.data[0]).toHaveProperty('requiresPromotionDetails');
@@ -257,31 +262,55 @@ describe('Trade posts + reviews (e2e)', () => {
         })
         .expect(403);
 
-      const code = `${categoryCodePrefix}_CRUD`;
+      const name = `Danh mục ${categoryCodePrefix} CRUD`;
+      const expectedSlug = slugify(name).slice(0, 50);
       const created = await request(app.getHttpServer())
         .post('/api/v1/admin/trade-post-categories')
         .set('Authorization', `Bearer ${admin.accessToken}`)
         .send({
-          code: code.toLowerCase(),
-          name: 'Danh mục CRUD',
+          name,
           description: 'Danh mục test',
           sortOrder: 90,
+          isActive: true,
           requiresPromotionDetails: false,
         })
         .expect(201);
-      expect(created.body.data.code).toBe(code);
+      expect(created.body.data.code).toBe(expectedSlug);
+      expect(created.body.data.slug).toBe(expectedSlug);
+
+      const detail = await request(app.getHttpServer())
+        .get(`/api/v1/admin/trade-post-categories/${created.body.data.id}`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(200);
+      expect(detail.body.data.slug).toBe(expectedSlug);
+
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/admin/trade-post-categories')
+        .query({ search: categoryCodePrefix })
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(200);
+      expect(
+        (list.body.data as Array<{ id: string }>).map((item) => item.id),
+      ).toContain(created.body.data.id);
+
+      const duplicatedName = await request(app.getHttpServer())
+        .post('/api/v1/admin/trade-post-categories')
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({ name })
+        .expect(201);
+      expect(duplicatedName.body.data.slug).toBe(`${expectedSlug}-2`);
 
       await request(app.getHttpServer())
         .post('/api/v1/admin/trade-post-categories')
         .set('Authorization', `Bearer ${admin.accessToken}`)
-        .send({ code: 'bad-code', name: 'Bad code' })
-        .expect(400);
-
-      await request(app.getHttpServer())
-        .post('/api/v1/admin/trade-post-categories')
-        .set('Authorization', `Bearer ${admin.accessToken}`)
-        .send({ code, name: 'Duplicate' })
-        .expect(409);
+        .send({ name: '' })
+        .expect(400)
+        .expect((response) => {
+          expect(response.body.error.code).toBe('VALIDATION_ERROR');
+          expect(response.body.error.details).toContainEqual(
+            expect.objectContaining({ field: 'name' }),
+          );
+        });
 
       await request(app.getHttpServer())
         .patch(`/api/v1/admin/trade-post-categories/${created.body.data.id}`)
@@ -307,6 +336,7 @@ describe('Trade posts + reviews (e2e)', () => {
         })
         .expect(200);
       expect(updated.body.data.version).toBe(created.body.data.version + 1);
+      expect(updated.body.data.slug).toBe(expectedSlug);
 
       await request(app.getHttpServer())
         .patch(`/api/v1/admin/trade-post-categories/${created.body.data.id}`)
@@ -350,6 +380,20 @@ describe('Trade posts + reviews (e2e)', () => {
         .send({ isActive: false, version: updated.body.data.version })
         .expect(200);
       expect(hidden.body.data.isActive).toBe(false);
+
+      await request(app.getHttpServer())
+        .delete(
+          `/api/v1/admin/trade-post-categories/${duplicatedName.body.data.id}`,
+        )
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(204);
+
+      await request(app.getHttpServer())
+        .get(
+          `/api/v1/admin/trade-post-categories/${duplicatedName.body.data.id}`,
+        )
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(404);
     });
 
     it('creates and filters trade posts by category code from DB', async () => {
@@ -388,9 +432,8 @@ describe('Trade posts + reviews (e2e)', () => {
         .get('/api/v1/trade-posts')
         .query({ category: code })
         .expect(200);
-      expect(
-        listRes.body.data.map((post: { id: string }) => post.id),
-      ).toContain(createRes.body.data.id);
+      const posts = listRes.body.data as Array<{ id: string }>;
+      expect(posts.map((post) => post.id)).toContain(createRes.body.data.id);
 
       await request(app.getHttpServer())
         .get('/api/v1/trade-posts')

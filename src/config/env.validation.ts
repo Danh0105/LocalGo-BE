@@ -23,6 +23,10 @@ export const envValidationSchema = Joi.object({
   RATE_LIMIT_TTL: Joi.number().positive().default(60000),
   RATE_LIMIT_LIMIT: Joi.number().positive().default(100),
 
+  // Optional dedicated salt for anonymous visitor hashing in trade analytics.
+  // Falls back to JWT_ACCESS_SECRET when unset (see app.config.ts).
+  TRADE_ANALYTICS_HASH_SECRET: Joi.string().min(16).optional(),
+
   MEDIA_STORAGE_PROVIDER: Joi.string().valid('local', 's3').default('local'),
 
   ZALO_AUTH_MODE: Joi.string().valid('mock', 'real').default('mock'),

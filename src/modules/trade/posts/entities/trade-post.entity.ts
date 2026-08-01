@@ -114,6 +114,7 @@ export class TradePostEntity {
     this.categoryInfo = {
       id: post.category.id,
       code: post.category.code,
+      slug: post.category.code,
       name: post.category.name,
       description: post.category.description,
       sortOrder: post.category.sortOrder,

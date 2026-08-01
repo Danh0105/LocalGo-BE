@@ -203,6 +203,14 @@ enum TradeReviewStatus {
   HIDDEN
 }
 
+enum TradePostEventType {
+  VIEW
+  CONTACT_PHONE
+  CONTACT_ZALO
+  SHARE
+  SAVE
+}
+
 // ---------- Core / Auth ----------
 
 model User {
@@ -262,6 +270,8 @@ model User {
   newsArticlesUpdated           NewsArticle[]         @relation("NewsArticleUpdater")
   tradePostCategoriesCreated    TradePostCategory[]   @relation("TradePostCategoryCreator")
   tradePostCategoriesUpdated    TradePostCategory[]   @relation("TradePostCategoryUpdater")
+  tradePostEvents               TradePostEvent[]      @relation("TradePostEventUser")
+  savedTradePosts               SavedTradePost[]
 
   @@index([role])
 }
@@ -957,6 +967,7 @@ model TradePost {
   promotionEndAt   DateTime?
   expiresAt        DateTime?
   viewCount        Int                @default(0)
+  saveCount        Int                @default(0)
   averageRating    Decimal            @default(0) @db.Decimal(2, 1)
   reviewCount      Int                @default(0)
   publishedAt      DateTime?
@@ -970,6 +981,8 @@ model TradePost {
 
   images  TradePostImage[]
   reviews TradeReview[]
+  events  TradePostEvent[]
+  savedBy SavedTradePost[]
 
   @@index([status, publishedAt])
   @@index([ownerId])
@@ -1026,6 +1039,48 @@ model TradeReviewImage {
   createdAt     DateTime    @default(now())
 
   @@unique([tradeReviewId, mediaId])
+}
+
+// ---------- Trade analytics / engagement ----------
+
+// Append-only engagement log: one row per view/interaction. Powers the
+// business & admin analytics dashboards (traffic over time, unique visitors,
+// interaction breakdown). Denormalized counters (TradePost.viewCount /
+// saveCount) stay for cheap list-sort/display; this table is the source of
+// truth for anything time-bucketed or de-duplicated.
+model TradePostEvent {
+  id          String             @id @default(uuid())
+  tradePostId String
+  tradePost   TradePost          @relation(fields: [tradePostId], references: [id], onDelete: Cascade)
+  type        TradePostEventType
+  // Logged-in actor (null for anonymous visitors). SetNull so purging a user
+  // never destroys historical aggregates.
+  userId      String?
+  user        User?              @relation("TradePostEventUser", fields: [userId], references: [id], onDelete: SetNull)
+  // SHA-256 hex of (secret + ip + userAgent) — approximates a unique
+  // anonymous visitor without ever persisting the raw IP.
+  visitorHash String?            @db.VarChar(64)
+  createdAt   DateTime           @default(now())
+
+  @@index([tradePostId, type, createdAt])
+  @@index([tradePostId, createdAt])
+  @@index([createdAt])
+}
+
+// Source of truth for "saved / bookmarked" state and the user's saved list.
+// A save also emits a TradePostEvent(SAVE) so the analytics timeline can chart
+// saves per day.
+model SavedTradePost {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradePostId String
+  tradePost   TradePost @relation(fields: [tradePostId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, tradePostId])
+  @@index([tradePostId])
+  @@index([userId, createdAt])
 }
 
 // ---------- Audit ----------

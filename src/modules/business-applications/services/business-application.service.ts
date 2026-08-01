@@ -184,7 +184,10 @@ export class BusinessApplicationService {
     );
   }
 
-  async approve(actorId: string, id: string): Promise<BusinessApplicationEntity> {
+  async approve(
+    actorId: string,
+    id: string,
+  ): Promise<BusinessApplicationEntity> {
     await this.prisma.$transaction(
       async (tx) => {
         const application = await tx.businessApplication.findUnique({

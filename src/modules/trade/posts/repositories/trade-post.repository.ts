@@ -53,6 +53,36 @@ export class TradePostRepository {
     });
   }
 
+  /**
+   * Resolves the id of a post that is publicly viewable right now — same
+   * visibility gate as `TradePostService.getPublicDetail` (PUBLISHED, active
+   * category, not expired). Used by the engagement/interaction write path to
+   * reject events against hidden/expired/nonexistent posts without loading the
+   * full detail payload.
+   */
+  async findViewableIdBySlugOrId(
+    idOrSlug: string,
+  ): Promise<{ id: string } | null> {
+    return this.prisma.tradePost.findFirst({
+      where: {
+        deletedAt: null,
+        OR: [{ id: idOrSlug }, { slug: idOrSlug }],
+        status: 'PUBLISHED',
+        category: { isActive: true, deletedAt: null },
+        AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+      },
+      select: { id: true },
+    });
+  }
+
+  /** Resolves a non-deleted post id by id or slug, regardless of status. */
+  async findIdBySlugOrId(idOrSlug: string): Promise<{ id: string } | null> {
+    return this.prisma.tradePost.findFirst({
+      where: { deletedAt: null, OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+      select: { id: true },
+    });
+  }
+
   findAdminDetail(id: string): Promise<TradePostWithImagesAndOwner | null> {
     return this.prisma.tradePost.findFirst({
       where: { id, deletedAt: null },

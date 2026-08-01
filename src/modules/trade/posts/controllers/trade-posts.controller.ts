@@ -16,8 +16,10 @@ import { Public } from '../../../../common/decorators/public.decorator';
 import type { AuthenticatedUser } from '../../../auth/types/authenticated-user.interface';
 import { CreateTradePostDto } from '../dto/create-trade-post.dto';
 import { QueryTradePostDto } from '../dto/query-trade-post.dto';
+import { RecordTradePostInteractionDto } from '../dto/record-trade-post-interaction.dto';
 import { TradePostResponseDto } from '../dto/trade-post-response.dto';
 import { UpdateTradePostDto } from '../dto/update-trade-post.dto';
+import { TradePostEngagementService } from '../services/trade-post-engagement.service';
 import { TradePostStatusService } from '../services/trade-post-status.service';
 import { TradePostService } from '../services/trade-post.service';
 
@@ -27,6 +29,7 @@ export class TradePostsController {
   constructor(
     private readonly tradePostService: TradePostService,
     private readonly tradePostStatusService: TradePostStatusService,
+    private readonly engagementService: TradePostEngagementService,
   ) {}
 
   @Public()
@@ -83,6 +86,26 @@ export class TradePostsController {
   ): Promise<TradePostResponseDto> {
     const post = await this.tradePostService.getPublicDetail(idOrSlug);
     return TradePostResponseDto.fromEntity(post);
+  }
+
+  @Public()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Ghi nhận tương tác với tin (gọi điện / Zalo / chia sẻ)',
+    description:
+      'Dùng để đo lường tương tác của người dùng phục vụ thống kê. Gọi khi người dùng bấm nút gọi điện, liên hệ Zalo, hoặc chia sẻ tin.',
+  })
+  @Post(':idOrSlug/interactions')
+  async recordInteraction(
+    @Param('idOrSlug') idOrSlug: string,
+    @Body() dto: RecordTradePostInteractionDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ): Promise<void> {
+    await this.engagementService.recordInteraction(
+      idOrSlug,
+      dto.type,
+      user?.id,
+    );
   }
 
   @ApiBearerAuth()

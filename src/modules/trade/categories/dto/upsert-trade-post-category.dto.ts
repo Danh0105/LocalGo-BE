@@ -26,15 +26,16 @@ const trimToNull = ({ value }: { value: unknown }): unknown => {
 };
 
 export class CreateTradePostCategoryDto {
-  @ApiProperty({
-    example: 'PRODUCT',
+  @ApiPropertyOptional({
+    example: 'nong-san-dia-phuong',
     description:
-      'Public stable identifier. Uppercase letters, digits and underscore only.',
+      'Legacy override only. Nếu không gửi, backend tự sinh slug từ name.',
   })
+  @IsOptional()
   @Transform(normalizeCode)
   @IsString()
   @Matches(TRADE_POST_CATEGORY_CODE_PATTERN)
-  code: string;
+  code?: string;
 
   @ApiProperty({ maxLength: 120 })
   @Transform(trim)

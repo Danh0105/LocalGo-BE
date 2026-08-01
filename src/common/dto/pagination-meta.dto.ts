@@ -17,7 +17,7 @@ export class PaginationMetaDto {
     this.page = page;
     this.limit = limit;
     this.total = total;
-    this.totalPages = limit > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
+    this.totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
   }
 }
 

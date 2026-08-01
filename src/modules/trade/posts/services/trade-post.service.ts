@@ -24,6 +24,7 @@ import { UpdateTradePostDto } from '../dto/update-trade-post.dto';
 import { TradePostEntity } from '../entities/trade-post.entity';
 import { TradePostRepository } from '../repositories/trade-post.repository';
 import { assertValidTradePostState } from '../utils/trade-post-business-rules.util';
+import { TradePostEngagementService } from './trade-post-engagement.service';
 
 @Injectable()
 export class TradePostService {
@@ -32,6 +33,7 @@ export class TradePostService {
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
     private readonly categoryService: TradePostCategoryService,
+    private readonly engagementService: TradePostEngagementService,
   ) {}
 
   async create(
@@ -323,6 +325,7 @@ export class TradePostService {
       );
     }
     await this.tradePostRepository.incrementViewCount(post.id);
+    await this.engagementService.recordView(post.id);
     return new TradePostEntity(post);
   }
 

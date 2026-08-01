@@ -5,6 +5,7 @@ import { RequestContextService } from '../../src/common/context/request-context.
 import { HttpExceptionFilter } from '../../src/common/filters/http-exception.filter';
 import { ResponseInterceptor } from '../../src/common/interceptors/response.interceptor';
 import { AppModule } from '../../src/app.module';
+import { createValidationException } from '../../src/common/validation/validation-exception.factory';
 
 /**
  * Mirrors the production bootstrap in src/main.ts (global prefix,
@@ -26,6 +27,7 @@ export async function createTestApp(): Promise<INestApplication> {
       forbidNonWhitelisted: true,
       transform: true,
       transformOptions: { enableImplicitConversion: false },
+      exceptionFactory: createValidationException,
     }),
   );
 

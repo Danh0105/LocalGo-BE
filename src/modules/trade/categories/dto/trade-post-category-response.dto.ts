@@ -4,6 +4,7 @@ import { TradePostCategoryEntity } from '../entities/trade-post-category.entity'
 export class TradePostCategoryResponseDto {
   @ApiProperty({ format: 'uuid' }) id: string;
   @ApiProperty({ example: 'PRODUCT' }) code: string;
+  @ApiProperty({ example: 'nong-san-dia-phuong' }) slug: string;
   @ApiProperty({ example: 'Sản phẩm' }) name: string;
   @ApiPropertyOptional({
     nullable: true,
@@ -19,6 +20,7 @@ export class TradePostCategoryResponseDto {
     return {
       id: entity.id,
       code: entity.code,
+      slug: entity.code,
       name: entity.name,
       description: entity.description,
       sortOrder: entity.sortOrder,

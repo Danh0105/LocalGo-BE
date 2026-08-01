@@ -3,6 +3,7 @@ import { Prisma } from '../../../../../generated/prisma';
 import { ErrorCode } from '../../../../common/constants/error-codes.constant';
 import { AppException } from '../../../../common/exceptions/app.exception';
 import { PaginatedResultDto } from '../../../../common/dto/pagination-meta.dto';
+import { slugify } from '../../../../common/utils/slugify.util';
 import {
   buildPaginationArgs,
   paginate,
@@ -77,7 +78,9 @@ export class TradePostCategoryService {
     actorId: string,
     dto: CreateTradePostCategoryDto,
   ): Promise<TradePostCategoryEntity> {
-    const code = normalizeTradePostCategoryCode(dto.code);
+    const code = dto.code
+      ? normalizeTradePostCategoryCode(dto.code)
+      : await this.generateUniqueCategorySlug(dto.name);
     if (!TRADE_POST_CATEGORY_CODE_PATTERN.test(code)) {
       throw this.invalidCategory();
     }
@@ -262,10 +265,7 @@ export class TradePostCategoryService {
       _count: { _all: true },
     });
     const countByCategoryId = new Map(
-      counts.map((count) => [
-        count.categoryId,
-        (count._count as { _all: number })._all,
-      ]),
+      counts.map((count) => [count.categoryId, count._count._all]),
     );
     return records.map(
       (record) =>
@@ -313,7 +313,7 @@ export class TradePostCategoryService {
     if (!TRADE_POST_CATEGORY_CODE_PATTERN.test(code)) {
       throw this.invalidCategory();
     }
-    const category = await this.repository.findByCode(code);
+    const category = await this.findByCodeWithLegacyFallback(code);
     if (!category || category.deletedAt !== null || !category.isActive) {
       throw this.invalidCategory();
     }
@@ -325,7 +325,7 @@ export class TradePostCategoryService {
     if (!TRADE_POST_CATEGORY_CODE_PATTERN.test(code)) {
       throw this.invalidCategory();
     }
-    const category = await this.repository.findByCode(code);
+    const category = await this.findByCodeWithLegacyFallback(code);
     if (
       !category ||
       category.deletedAt !== null ||
@@ -348,6 +348,25 @@ export class TradePostCategoryService {
       _max: { sortOrder: true },
     });
     return (result._max.sortOrder ?? -1) + 1;
+  }
+
+  private async generateUniqueCategorySlug(name: string): Promise<string> {
+    const base = slugify(name).slice(0, 50).replace(/-+$/g, '') || 'category';
+    let candidate = base;
+    let suffix = 1;
+    while (await this.repository.findByCode(candidate)) {
+      suffix += 1;
+      const postfix = `-${suffix}`;
+      candidate = `${base.slice(0, 50 - postfix.length).replace(/-+$/g, '')}${postfix}`;
+    }
+    return candidate;
+  }
+
+  private async findByCodeWithLegacyFallback(code: string) {
+    const category = await this.repository.findByCode(code);
+    if (category) return category;
+    const legacyCode = code.toUpperCase();
+    return legacyCode === code ? null : this.repository.findByCode(legacyCode);
   }
 
   private async versionConflict(

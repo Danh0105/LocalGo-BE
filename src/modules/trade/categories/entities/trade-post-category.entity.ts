@@ -3,6 +3,7 @@ import type { TradePostCategory } from '../../../../../generated/prisma';
 export interface TradePostCategoryInfoView {
   id: string;
   code: string;
+  slug: string;
   name: string;
   description: string | null;
   sortOrder: number;
@@ -12,6 +13,7 @@ export interface TradePostCategoryInfoView {
 export class TradePostCategoryEntity implements TradePostCategoryInfoView {
   id: string;
   code: string;
+  slug: string;
   name: string;
   description: string | null;
   sortOrder: number;
@@ -26,6 +28,7 @@ export class TradePostCategoryEntity implements TradePostCategoryInfoView {
   constructor(category: TradePostCategory & { postCount?: number | null }) {
     this.id = category.id;
     this.code = category.code;
+    this.slug = category.code;
     this.name = category.name;
     this.description = category.description;
     this.sortOrder = category.sortOrder;
@@ -44,6 +47,7 @@ export class TradePostCategoryEntity implements TradePostCategoryInfoView {
     return {
       id: this.id,
       code: this.code,
+      slug: this.slug,
       name: this.name,
       description: this.description,
       sortOrder: this.sortOrder,

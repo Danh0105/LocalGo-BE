@@ -9,6 +9,9 @@ export interface AppConfig {
   publicBaseUrl: string;
   rateLimitTtlMs: number;
   rateLimitLimit: number;
+  // Server-side salt for hashing (ip + userAgent) into an anonymous visitor
+  // fingerprint used by trade-post analytics. Never persist the raw IP.
+  analyticsHashSecret: string;
 }
 
 export default registerAs('app', (): AppConfig => ({
@@ -23,4 +26,8 @@ export default registerAs('app', (): AppConfig => ({
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:3001',
   rateLimitTtlMs: Number(process.env.RATE_LIMIT_TTL ?? 60000),
   rateLimitLimit: Number(process.env.RATE_LIMIT_LIMIT ?? 100),
+  analyticsHashSecret:
+    process.env.TRADE_ANALYTICS_HASH_SECRET ??
+    process.env.JWT_ACCESS_SECRET ??
+    'localgo-analytics-dev-secret',
 }));
