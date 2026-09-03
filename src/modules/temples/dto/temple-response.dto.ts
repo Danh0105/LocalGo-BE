@@ -19,7 +19,7 @@ export class TempleListItemResponseDto {
   @ApiProperty()
   name: string;
 
-  @ApiProperty({ enum: ['Đình', 'Chùa', 'Miếu'] })
+  @ApiProperty({ enum: ['Đình', 'Đền', 'Chùa', 'Miếu'] })
   type: TempleTypeLabel;
 
   @ApiProperty()

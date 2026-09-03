@@ -1,6 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import {
   SPECIALTY_CATEGORIES,
@@ -15,6 +21,16 @@ export class QuerySpecialtyPublicDto {
 }
 
 export class QuerySpecialtyAdminDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ default: false, type: Boolean })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  })
+  @IsBoolean({ message: 'includeDeleted phải là true hoặc false' })
+  includeDeleted: boolean = false;
+
   @ApiPropertyOptional({ enum: SPECIALTY_CATEGORIES })
   @IsOptional()
   @IsIn(SPECIALTY_CATEGORIES)

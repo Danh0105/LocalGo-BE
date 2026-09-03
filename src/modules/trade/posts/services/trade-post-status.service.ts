@@ -5,6 +5,8 @@ import { ErrorCode } from '../../../../common/constants/error-codes.constant';
 import { AppException } from '../../../../common/exceptions/app.exception';
 import { AuditLogService } from '../../../audit-log/services/audit-log.service';
 import type { AuthenticatedUser } from '../../../auth/types/authenticated-user.interface';
+import { UserService } from '../../../users/services/user.service';
+import { ZaloOaMessagingService } from '../../../zalo/services/zalo-oa-messaging.service';
 import { TradePostEntity } from '../entities/trade-post.entity';
 import { TradePostRepository } from '../repositories/trade-post.repository';
 import { isValidTradePostTransition } from '../utils/trade-post-transitions.util';
@@ -14,6 +16,8 @@ export class TradePostStatusService {
   constructor(
     private readonly tradePostRepository: TradePostRepository,
     private readonly auditLogService: AuditLogService,
+    private readonly userService: UserService,
+    private readonly zaloOaMessagingService: ZaloOaMessagingService,
   ) {}
 
   async submit(user: AuthenticatedUser, id: string): Promise<TradePostEntity> {
@@ -47,6 +51,19 @@ export class TradePostStatusService {
       oldData: { status: post.status },
       newData: { status: TradePostStatus.PUBLISHED },
     });
+
+    const zaloId = await this.userService.findZaloIdById(post.ownerId);
+    if (zaloId) {
+      await this.zaloOaMessagingService.notifyTradePostApproved({
+        zaloUserId: zaloId,
+        title: post.title,
+        summary: post.summary,
+        imageUrl: post.thumbnailUrl,
+        postId: post.id,
+        slug: post.slug,
+      });
+    }
+
     return new TradePostEntity(updated);
   }
 

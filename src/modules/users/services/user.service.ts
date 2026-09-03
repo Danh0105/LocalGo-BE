@@ -61,4 +61,9 @@ export class UserService {
   async touchLastLogin(userId: string): Promise<void> {
     await this.userRepository.touchLastLogin(userId);
   }
+
+  async findZaloIdById(userId: string): Promise<string | null> {
+    const user = await this.userRepository.findById(userId);
+    return user?.zaloId ?? null;
+  }
 }

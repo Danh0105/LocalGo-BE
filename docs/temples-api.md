@@ -1,5 +1,7 @@
 # API Đền - Chùa - Miếu
 
+Các giá trị hợp lệ của trường `type` là `Đình`, `Đền`, `Chùa`, `Miếu`.
+
 Module `temples` quản lý danh sách nhiều điểm du lịch. Mọi endpoint dùng prefix `/api/v1` và response envelope chung của dự án.
 
 ## Endpoints

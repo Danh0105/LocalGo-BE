@@ -54,6 +54,9 @@ export class SpecialtyAdminResponseDto extends SpecialtyResponseDto {
   @ApiProperty()
   createdAt: Date;
 
+  @ApiPropertyOptional({ nullable: true, type: Date })
+  deletedAt: Date | null;
+
   @ApiPropertyOptional({ nullable: true })
   createdBy: string | null;
 

@@ -7,6 +7,8 @@ import authConfig from './config/auth.config';
 import databaseConfig from './config/database.config';
 import jwtConfig from './config/jwt.config';
 import mediaConfig from './config/media.config';
+import chatbotConfig from './config/chatbot.config';
+import zaloOaConfig from './config/zalo-oa.config';
 import { envValidationSchema } from './config/env.validation';
 import { PrismaModule } from './database/prisma.module';
 import { CommonModule } from './common/common.module';
@@ -34,13 +36,22 @@ import { FeedbackModule } from './modules/feedback/feedback.module';
 import { MapPlacesModule } from './modules/map-places/map-places.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { NewsModule } from './modules/news/news.module';
+import { ChatbotModule } from './modules/chatbot/chatbot.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: process.env.NODE_ENV === 'test' ? '.env.test' : '.env',
-      load: [appConfig, authConfig, databaseConfig, jwtConfig, mediaConfig],
+      load: [
+        appConfig,
+        authConfig,
+        databaseConfig,
+        jwtConfig,
+        mediaConfig,
+        chatbotConfig,
+        zaloOaConfig,
+      ],
       validationSchema: envValidationSchema,
       validationOptions: {
         abortEarly: false,
@@ -93,6 +104,7 @@ import { NewsModule } from './modules/news/news.module';
     MapPlacesModule,
     ContactsModule,
     NewsModule,
+    ChatbotModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

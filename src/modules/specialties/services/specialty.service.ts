@@ -59,6 +59,7 @@ export class SpecialtyService {
     const records = await this.prisma.specialty.findMany({
       where: {
         isActive: true,
+        deletedAt: null,
         ...(query.category
           ? { category: SPECIALTY_CATEGORY_TO_DB[query.category] }
           : {}),
@@ -71,7 +72,7 @@ export class SpecialtyService {
 
   async publicDetail(id: string): Promise<SpecialtyResponseDto> {
     const record = await this.prisma.specialty.findFirst({
-      where: { id, isActive: true },
+      where: { id, isActive: true, deletedAt: null },
       include: includeSpecialty,
     });
     if (!record) throw this.notFound();
@@ -80,6 +81,7 @@ export class SpecialtyService {
 
   async adminList(query: QuerySpecialtyAdminDto) {
     const where: Prisma.SpecialtyWhereInput = {
+      ...(query.includeDeleted ? {} : { deletedAt: null }),
       ...(query.category
         ? { category: SPECIALTY_CATEGORY_TO_DB[query.category] }
         : {}),
@@ -113,12 +115,7 @@ export class SpecialtyService {
     actorId: string,
     dto: CreateSpecialtyDto,
   ): Promise<SpecialtyAdminResponseDto> {
-    const id = dto.id ?? slugify(dto.name);
-    const duplicate = await this.prisma.specialty.findUnique({
-      where: { id },
-      select: { id: true },
-    });
-    if (duplicate) throw this.slugExists();
+    const id = await this.resolveCreateId(dto);
     await this.validateMedia(dto.mediaId, actorId, id);
 
     const record = await this.prisma.$transaction(async (tx) => {
@@ -157,6 +154,29 @@ export class SpecialtyService {
     return this.toAdminDto(record);
   }
 
+  private async resolveCreateId(dto: CreateSpecialtyDto): Promise<string> {
+    if (dto.id) {
+      const duplicate = await this.prisma.specialty.findUnique({
+        where: { id: dto.id },
+        select: { id: true },
+      });
+      if (duplicate) throw this.slugExists();
+      return dto.id;
+    }
+
+    const baseId = slugify(dto.name);
+    const matchingIds = await this.prisma.specialty.findMany({
+      where: { OR: [{ id: baseId }, { id: { startsWith: `${baseId}-` } }] },
+      select: { id: true },
+    });
+    const occupied = new Set(matchingIds.map(({ id }) => id));
+    if (!occupied.has(baseId)) return baseId;
+
+    let suffix = 2;
+    while (occupied.has(`${baseId}-${suffix}`)) suffix += 1;
+    return `${baseId}-${suffix}`;
+  }
+
   async update(
     actorId: string,
     id: string,
@@ -168,7 +188,7 @@ export class SpecialtyService {
     const { record, deletedMediaId } = await this.prisma.$transaction(
       async (tx) => {
         const updated = await tx.specialty.updateMany({
-          where: { id, version: dto.version },
+          where: { id, version: dto.version, deletedAt: null },
           data: {
             name: dto.name,
             category: SPECIALTY_CATEGORY_TO_DB[dto.category],
@@ -227,7 +247,7 @@ export class SpecialtyService {
   ): Promise<SpecialtyAdminResponseDto> {
     const record = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.specialty.updateMany({
-        where: { id, version: dto.version },
+        where: { id, version: dto.version, deletedAt: null },
         data: {
           isActive: dto.isActive,
           version: { increment: 1 },
@@ -264,11 +284,13 @@ export class SpecialtyService {
       );
     }
     return this.prisma.$transaction(async (tx) => {
-      const found = await tx.specialty.count({ where: { id: { in: ids } } });
+      const found = await tx.specialty.count({
+        where: { id: { in: ids }, deletedAt: null },
+      });
       if (found !== ids.length) throw this.notFound();
       for (const item of dto.items) {
         await tx.specialty.update({
-          where: { id: item.id },
+          where: { id: item.id, deletedAt: null },
           data: {
             sortOrder: item.sortOrder,
             version: { increment: 1 },
@@ -287,7 +309,7 @@ export class SpecialtyService {
         },
       });
       const records = await tx.specialty.findMany({
-        where: { id: { in: ids } },
+        where: { id: { in: ids }, deletedAt: null },
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
         include: includeSpecialty,
       });
@@ -296,15 +318,18 @@ export class SpecialtyService {
   }
 
   async remove(actorId: string, id: string): Promise<void> {
-    const current = await this.findOrThrow(id);
-    const deletedMediaId = await this.prisma.$transaction(async (tx) => {
-      await tx.specialty.delete({ where: { id } });
-      const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
-        previousMediaId: current.mediaId,
-        nextMediaId: null,
-        resourceType: MediaResourceType.SPECIALTY,
-        resourceId: id,
+    await this.findOrThrow(id);
+    await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.specialty.updateMany({
+        where: { id, deletedAt: null },
+        data: {
+          deletedAt: new Date(),
+          isActive: false,
+          version: { increment: 1 },
+          updatedById: actorId,
+        },
       });
+      if (deleted.count !== 1) throw this.notFound();
       await tx.auditLog.create({
         data: {
           actorId,
@@ -313,14 +338,12 @@ export class SpecialtyService {
           resourceId: id,
         },
       });
-      return deletedMediaId;
     });
-    await this.mediaService.purgeStorage([deletedMediaId]);
   }
 
   private async findOrThrow(id: string): Promise<SpecialtyRecord> {
-    const record = await this.prisma.specialty.findUnique({
-      where: { id },
+    const record = await this.prisma.specialty.findFirst({
+      where: { id, deletedAt: null },
       include: includeSpecialty,
     });
     if (!record) throw this.notFound();
@@ -357,6 +380,7 @@ export class SpecialtyService {
       isActive: record.isActive,
       version: record.version,
       createdAt: record.createdAt,
+      deletedAt: record.deletedAt,
       createdBy: record.createdBy?.displayName ?? null,
       updatedBy: record.updatedBy?.displayName ?? null,
     };
@@ -438,8 +462,8 @@ export class SpecialtyService {
     tx: Prisma.TransactionClient,
     id: string,
   ): Promise<AppException> {
-    const latest = await tx.specialty.findUnique({
-      where: { id },
+    const latest = await tx.specialty.findFirst({
+      where: { id, deletedAt: null },
       include: includeSpecialty,
     });
     if (!latest) return this.notFound();
@@ -454,7 +478,7 @@ export class SpecialtyService {
   private notFound(): AppException {
     return new AppException(
       ErrorCode.SPECIALTY_NOT_FOUND,
-      'Không tìm thấy đặc sản',
+      'Đặc sản không tồn tại hoặc đã bị xóa',
       HttpStatus.NOT_FOUND,
     );
   }

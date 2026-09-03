@@ -101,7 +101,7 @@ export class CreateTradePostDto {
   contactZalo?: string;
 
   @ApiPropertyOptional({
-    description: `Danh sách id ảnh đã tải lên qua POST /media/images (tối đa ${MAX_TRADE_POST_IMAGES})`,
+    description: `Danh sách id ảnh đã tải lên qua POST /media/images hoặc POST /media/images/batch (tối đa ${MAX_TRADE_POST_IMAGES})`,
     type: [String],
   })
   @IsOptional()

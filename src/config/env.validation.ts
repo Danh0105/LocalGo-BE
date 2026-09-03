@@ -23,6 +23,14 @@ export const envValidationSchema = Joi.object({
   RATE_LIMIT_TTL: Joi.number().positive().default(60000),
   RATE_LIMIT_LIMIT: Joi.number().positive().default(100),
 
+  OPENAI_API_KEY: Joi.string().min(1).optional(),
+  OPENAI_MODEL: Joi.string().min(1).default('gpt-5-nano'),
+  OPENAI_MAX_OUTPUT_TOKENS: Joi.number()
+    .integer()
+    .min(1)
+    .max(4096)
+    .default(800),
+
   // Optional dedicated salt for anonymous visitor hashing in trade analytics.
   // Falls back to JWT_ACCESS_SECRET when unset (see app.config.ts).
   TRADE_ANALYTICS_HASH_SECRET: Joi.string().min(16).optional(),
@@ -38,6 +46,16 @@ export const envValidationSchema = Joi.object({
     then: Joi.required(),
     otherwise: Joi.optional(),
   }),
+
+  // Zalo OA push (trade post approval notifications). Optional everywhere —
+  // the messaging service self-disables when ZALO_OA_ACCESS_TOKEN is unset,
+  // so these can stay empty until real OA credentials are issued.
+  ZALO_OA_ACCESS_TOKEN: Joi.string().min(1).optional(),
+  ZALO_OA_API_BASE_URL: Joi.string().uri().default('https://openapi.zalo.me'),
+  // Mini App id used to build the deep-link URL back into the app; the
+  // notification is sent without a usable link if left unset.
+  ZALO_MINI_APP_ID: Joi.string().min(1).optional(),
+  ZALO_MINI_APP_DEEPLINK_PATH: Joi.string().min(1).default('trade-posts'),
 
   // tlds: { allow: false } — SEED_ADMIN_EMAIL intentionally uses a .local
   // dev-only domain (per spec's own .env.example), which isn't a real IANA

@@ -17,6 +17,7 @@ describe('Specialties (e2e)', () => {
     first: `${prefix}-first`,
     second: `${prefix}-second`,
     hidden: `${prefix}-hidden`,
+    deleted: `${prefix}-deleted`,
   };
 
   async function login(label: string, role = UserRole.USER) {
@@ -94,6 +95,19 @@ describe('Specialties (e2e)', () => {
           sortOrder: 0,
           isActive: false,
         },
+        {
+          id: ids.deleted,
+          name: 'Món Đã Xóa',
+          category: SpecialtyCategory.MON_AN,
+          price: '40.000đ',
+          season: 'Quanh năm',
+          summary: 'Tóm tắt đã xóa',
+          description: ['Mô tả đã xóa'],
+          buyPlaces: ['Nơi bán đã xóa'],
+          sortOrder: 3,
+          isActive: false,
+          deletedAt: new Date('2026-08-21T00:00:00.000Z'),
+        },
       ],
     });
   });
@@ -114,6 +128,9 @@ describe('Specialties (e2e)', () => {
     const publicItems = (response.body as { data: Array<{ id: string }> }).data;
     const own = publicItems.filter((item) => item.id.startsWith(prefix));
     expect(own.map((item) => item.id)).toEqual([ids.second, ids.first]);
+    expect(own).not.toContainEqual(
+      expect.objectContaining({ id: ids.deleted }),
+    );
 
     const filtered = await request(app.getHttpServer())
       .get('/api/v1/specialties')
@@ -124,6 +141,61 @@ describe('Specialties (e2e)', () => {
     expect(
       filteredItems.filter((item) => item.id.startsWith(prefix)),
     ).toHaveLength(1);
+  });
+
+  it('admin list validates includeDeleted and applies filters and pagination to soft-deleted records', async () => {
+    const admin = await login('list-deleted-admin', UserRole.ADMIN);
+    const authorization = { Authorization: `Bearer ${admin.token}` };
+
+    for (const query of [{}, { includeDeleted: 'false' }]) {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/admin/specialties')
+        .set(authorization)
+        .query(query)
+        .expect(200);
+      const items = (
+        response.body as {
+          data: Array<{ id: string; deletedAt: string | null }>;
+        }
+      ).data;
+      const own = items.filter((item) => item.id.startsWith(prefix));
+      expect(own).toHaveLength(3);
+      expect(own.every((item) => item.deletedAt === null)).toBe(true);
+    }
+
+    const included = await request(app.getHttpServer())
+      .get('/api/v1/admin/specialties')
+      .set(authorization)
+      .query({
+        includeDeleted: 'true',
+        search: 'Món Đã Xóa',
+        category: 'Món ăn',
+        page: 1,
+        limit: 1,
+      })
+      .expect(200);
+    expect(included.body.data).toHaveLength(1);
+    expect(included.body.data[0]).toEqual(
+      expect.objectContaining({
+        id: ids.deleted,
+        deletedAt: '2026-08-21T00:00:00.000Z',
+      }),
+    );
+    expect(included.body.meta).toEqual(
+      expect.objectContaining({ total: 1, totalPages: 1 }),
+    );
+
+    const invalid = await request(app.getHttpServer())
+      .get('/api/v1/admin/specialties')
+      .set(authorization)
+      .query({ includeDeleted: 'invalid' })
+      .expect(400);
+    expect(invalid.body.error.code).toBe('VALIDATION_ERROR');
+    expect(invalid.body.error.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'includeDeleted' }),
+      ]),
+    );
   });
 
   it('public detail hides existence of inactive and missing records', async () => {
@@ -162,6 +234,17 @@ describe('Specialties (e2e)', () => {
       .send(body({ id: ids.first }))
       .expect(409);
     expect(duplicate.body.error.code).toBe('SPECIALTY_SLUG_EXISTS');
+  });
+
+  it('adds a numeric suffix when an automatically generated slug is already occupied', async () => {
+    const admin = await login('slug-suffix-admin', UserRole.ADMIN);
+    const first = await request(app.getHttpServer())
+      .post('/api/v1/admin/specialties')
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(body({ name: ids.first }))
+      .expect(201);
+
+    expect(first.body.data.id).toBe(`${ids.first}-2`);
   });
 
   it('updates only the target and returns latest data on a stale version conflict', async () => {
@@ -225,7 +308,7 @@ describe('Specialties (e2e)', () => {
     ).toBe(0);
   });
 
-  it('status changes public visibility and delete removes the record', async () => {
+  it('status changes public visibility and delete soft-deletes the record', async () => {
     const admin = await login('status-admin', UserRole.ADMIN);
     await request(app.getHttpServer())
       .patch(`/api/v1/admin/specialties/${ids.first}/status`)
@@ -240,9 +323,47 @@ describe('Specialties (e2e)', () => {
       .delete(`/api/v1/admin/specialties/${ids.second}`)
       .set('Authorization', `Bearer ${admin.token}`)
       .expect(204);
-    expect(
-      await prisma.specialty.findUnique({ where: { id: ids.second } }),
-    ).toBeNull();
+    const deleted = await prisma.specialty.findUniqueOrThrow({
+      where: { id: ids.second },
+    });
+    expect(deleted.deletedAt).toBeInstanceOf(Date);
+    expect(deleted.isActive).toBe(false);
+  });
+
+  it('update, status, reorder and delete reject soft-deleted records without changing them', async () => {
+    const admin = await login('deleted-actions-admin', UserRole.ADMIN);
+    const authorization = { Authorization: `Bearer ${admin.token}` };
+    const before = await prisma.specialty.findUniqueOrThrow({
+      where: { id: ids.deleted },
+    });
+
+    await request(app.getHttpServer())
+      .put(`/api/v1/admin/specialties/${ids.deleted}`)
+      .set(authorization)
+      .send(body({ version: before.version }))
+      .expect(404);
+    await request(app.getHttpServer())
+      .patch(`/api/v1/admin/specialties/${ids.deleted}/status`)
+      .set(authorization)
+      .send({ isActive: true, version: before.version })
+      .expect(404);
+    await request(app.getHttpServer())
+      .patch('/api/v1/admin/specialties/reorder')
+      .set(authorization)
+      .send({ items: [{ id: ids.deleted, sortOrder: 0 }] })
+      .expect(404);
+    await request(app.getHttpServer())
+      .delete(`/api/v1/admin/specialties/${ids.deleted}`)
+      .set(authorization)
+      .expect(404);
+
+    const after = await prisma.specialty.findUniqueOrThrow({
+      where: { id: ids.deleted },
+    });
+    expect(after).toEqual(before);
+    await request(app.getHttpServer())
+      .get(`/api/v1/specialties/${ids.deleted}`)
+      .expect(404);
   });
 
   it('rejects missing media and non-image media', async () => {

@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MediaModule } from '../media/media.module';
+import { UsersModule } from '../users/users.module';
+import { ZaloModule } from '../zalo/zalo.module';
 import { TradePostCategoriesAdminController } from './categories/controllers/trade-post-categories-admin.controller';
 import { TradePostCategoriesController } from './categories/controllers/trade-post-categories.controller';
 import { TradePostCategoryRepository } from './categories/repositories/trade-post-category.repository';
@@ -25,7 +27,7 @@ import { TradeRatingService } from './reviews/services/trade-rating.service';
 import { TradeReviewService } from './reviews/services/trade-review.service';
 
 @Module({
-  imports: [MediaModule],
+  imports: [MediaModule, UsersModule, ZaloModule],
   controllers: [
     TradePostCategoriesController,
     TradePostCategoriesAdminController,

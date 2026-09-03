@@ -57,6 +57,7 @@ enum MediaResourceType {
 
 enum TempleType {
   DINH
+  DEN
   CHUA
   MIEU
 }
@@ -431,6 +432,7 @@ model Specialty {
   updatedById String?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
+  deletedAt   DateTime?
 
   media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
   createdBy User?  @relation("SpecialtyCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -439,6 +441,7 @@ model Specialty {
   @@index([isActive, sortOrder, createdAt])
   @@index([category, isActive, sortOrder])
   @@index([name])
+  @@index([deletedAt])
 }
 
 // ---------- Historical sites: di tích lịch sử ----------
