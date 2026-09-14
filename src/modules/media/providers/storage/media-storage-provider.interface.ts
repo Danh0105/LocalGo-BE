@@ -1,15 +1,17 @@
 export interface UploadMediaInput {
   storageKey: string;
-  thumbnailKey: string;
+  // Videos have no generated thumbnail (no ffmpeg dependency in this
+  // project) — omit both fields to skip writing/returning one.
+  thumbnailKey?: string;
   originalBuffer: Buffer;
-  thumbnailBuffer: Buffer;
+  thumbnailBuffer?: Buffer;
   mimeType: string;
 }
 
 export interface StoredMedia {
   storageKey: string;
   originalUrl: string;
-  thumbnailUrl: string;
+  thumbnailUrl?: string;
 }
 
 export interface MediaStorageService {

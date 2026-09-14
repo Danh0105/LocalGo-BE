@@ -19,11 +19,20 @@ import {
   detectImageMimeType,
   processUploadedImage,
 } from '../utils/image-processing.util';
+import {
+  ALLOWED_VIDEO_MIME_TYPES,
+  VIDEO_EXTENSION_BY_MIME_TYPE,
+  detectVideoMimeType,
+} from '../utils/video-processing.util';
 
 export interface UploadImageInput {
   ownerId: string;
   buffer: Buffer;
   resourceType?: MediaResourceType;
+}
+
+export interface UploadFeedbackAttachmentInput {
+  buffer: Buffer;
 }
 
 export interface ReleaseSingularMediaInput {
@@ -44,10 +53,48 @@ export class MediaService {
   ) {}
 
   async uploadImage(input: UploadImageInput): Promise<MediaEntity> {
+    return this.processAndStoreImage(input.buffer, {
+      ownerId: input.ownerId,
+      resourceType: input.resourceType,
+    });
+  }
+
+  /**
+   * Public feedback-ticket attachment upload: anonymous (no logged-in user,
+   * so `ownerId` is left null), image-or-video, unclaimed until the ticket
+   * is submitted (see FeedbackTicketService.submit, which sets
+   * resourceType=FEEDBACK_TICKET/resourceId once the ticket exists).
+   */
+  async uploadFeedbackAttachment(
+    input: UploadFeedbackAttachmentInput,
+  ): Promise<MediaEntity> {
+    const detectedImageMime = detectImageMimeType(input.buffer);
+    if (detectedImageMime && ALLOWED_IMAGE_MIME_TYPES.has(detectedImageMime)) {
+      return this.processAndStoreImage(input.buffer, { ownerId: null });
+    }
+
+    const detectedVideoMime = detectVideoMimeType(input.buffer);
+    if (detectedVideoMime && ALLOWED_VIDEO_MIME_TYPES.has(detectedVideoMime)) {
+      return this.storeVideo(input.buffer, detectedVideoMime, {
+        ownerId: null,
+      });
+    }
+
+    throw new AppException(
+      ErrorCode.INVALID_FEEDBACK_ATTACHMENT,
+      'Chỉ chấp nhận ảnh (JPG, PNG, WebP) hoặc video (MP4, MOV, WebM)',
+      HttpStatus.BAD_REQUEST,
+    );
+  }
+
+  private async processAndStoreImage(
+    buffer: Buffer,
+    options: { ownerId: string | null; resourceType?: MediaResourceType },
+  ): Promise<MediaEntity> {
     const mediaConfig = this.configService.getOrThrow<MediaConfig>('media');
 
     const maxBytes = mediaConfig.maxImageSizeMb * 1024 * 1024;
-    if (input.buffer.byteLength > maxBytes) {
+    if (buffer.byteLength > maxBytes) {
       throw new AppException(
         ErrorCode.IMAGE_SIZE_EXCEEDED,
         `Kích thước ảnh vượt quá ${mediaConfig.maxImageSizeMb}MB`,
@@ -55,7 +102,7 @@ export class MediaService {
       );
     }
 
-    const detectedMime = detectImageMimeType(input.buffer);
+    const detectedMime = detectImageMimeType(buffer);
     if (!detectedMime || !ALLOWED_IMAGE_MIME_TYPES.has(detectedMime)) {
       throw new AppException(
         ErrorCode.INVALID_IMAGE_FORMAT,
@@ -64,7 +111,7 @@ export class MediaService {
       );
     }
 
-    const processed = await processUploadedImage(input.buffer);
+    const processed = await processUploadedImage(buffer);
     const checksum = createHash('sha256')
       .update(processed.originalBuffer)
       .digest('hex');
@@ -83,7 +130,7 @@ export class MediaService {
 
     const media = await this.mediaRepository.create({
       id,
-      ownerId: input.ownerId,
+      ownerId: options.ownerId,
       storageProvider:
         mediaConfig.storageProvider === 's3'
           ? MediaStorageProviderEnum.S3
@@ -96,7 +143,59 @@ export class MediaService {
       width: processed.width,
       height: processed.height,
       checksum,
-      resourceType: input.resourceType,
+      resourceType: options.resourceType,
+    });
+
+    return new MediaEntity(media);
+  }
+
+  /**
+   * Stores a video as-is (no transcoding/thumbnail — no ffmpeg dependency
+   * in this project) after validating its real container type and size.
+   */
+  private async storeVideo(
+    buffer: Buffer,
+    mimeType: string,
+    options: { ownerId: string | null; resourceType?: MediaResourceType },
+  ): Promise<MediaEntity> {
+    const mediaConfig = this.configService.getOrThrow<MediaConfig>('media');
+
+    const maxBytes = mediaConfig.maxVideoSizeMb * 1024 * 1024;
+    if (buffer.byteLength > maxBytes) {
+      throw new AppException(
+        ErrorCode.VIDEO_SIZE_EXCEEDED,
+        `Kích thước video vượt quá ${mediaConfig.maxVideoSizeMb}MB`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const checksum = createHash('sha256').update(buffer).digest('hex');
+    const id = randomUUID();
+    const extension = VIDEO_EXTENSION_BY_MIME_TYPE[mimeType] ?? 'mp4';
+    const storageKey = `${id}.${extension}`;
+
+    const stored = await this.storageService.upload({
+      storageKey,
+      originalBuffer: buffer,
+      mimeType,
+    });
+
+    const media = await this.mediaRepository.create({
+      id,
+      ownerId: options.ownerId,
+      storageProvider:
+        mediaConfig.storageProvider === 's3'
+          ? MediaStorageProviderEnum.S3
+          : MediaStorageProviderEnum.LOCAL,
+      storageKey: stored.storageKey,
+      originalUrl: stored.originalUrl,
+      thumbnailUrl: stored.thumbnailUrl ?? null,
+      mimeType,
+      size: buffer.byteLength,
+      width: null,
+      height: null,
+      checksum,
+      resourceType: options.resourceType,
     });
 
     return new MediaEntity(media);

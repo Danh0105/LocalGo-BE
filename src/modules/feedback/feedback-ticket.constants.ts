@@ -1,5 +1,8 @@
 import { FeedbackTicketStatus as PrismaFeedbackTicketStatus } from '../../../generated/prisma';
 
+/** Max images/videos a citizen can attach to one feedback ticket. */
+export const MAX_FEEDBACK_ATTACHMENTS = 10;
+
 export const FEEDBACK_TICKET_STATUSES = [
   'new',
   'in_progress',

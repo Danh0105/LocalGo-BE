@@ -4,6 +4,7 @@ export interface MediaConfig {
   storageProvider: 'local' | 's3';
   uploadDir: string;
   maxImageSizeMb: number;
+  maxVideoSizeMb: number;
 }
 
 export default registerAs('media', (): MediaConfig => ({
@@ -11,4 +12,5 @@ export default registerAs('media', (): MediaConfig => ({
     (process.env.MEDIA_STORAGE_PROVIDER as 'local' | 's3') ?? 'local',
   uploadDir: process.env.UPLOAD_DIR ?? 'uploads',
   maxImageSizeMb: Number(process.env.MAX_IMAGE_SIZE_MB ?? 5),
+  maxVideoSizeMb: Number(process.env.MAX_VIDEO_SIZE_MB ?? 50),
 }));

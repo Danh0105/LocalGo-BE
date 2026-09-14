@@ -9,14 +9,18 @@ import { Prisma } from '../../../../../generated/prisma';
  * need-it since new reviews start PENDING; publish/hide/soft-delete/edit-
  * that-reverts-status all do).
  *
- * Concurrency safety: the UPDATE statement's subqueries are evaluated at
- * execution time, and the UPDATE itself takes Postgres's row lock on the
- * target TradePost row — a second concurrent transaction targeting the same
- * post blocks until the first commits, then sees its committed review
- * changes. No explicit `SELECT ... FOR UPDATE` is needed as long as the
- * aggregate is read and written in this single statement; if the aggregate
- * is ever split into a separate SELECT before the UPDATE, an explicit
- * `FOR UPDATE` becomes mandatory to avoid a lost-update race.
+ * Concurrency safety: under READ COMMITTED, when an UPDATE blocks on a
+ * row lock held by another transaction, PostgreSQL's EvalPlanQual re-check
+ * only refreshes the *target* row (TradePost) once the lock is released —
+ * it does NOT take a new snapshot for correlated subqueries against other
+ * tables (TradeReview) in the same statement. Those subqueries can still
+ * see the pre-wait snapshot and miss reviews committed by the transaction
+ * we were blocked on, causing a lost update. To avoid this we first take
+ * an explicit `SELECT ... FOR UPDATE` on the TradePost row (this blocks
+ * until any concurrent recompute commits), then run the aggregate UPDATE
+ * as a separate statement — which, under READ COMMITTED, gets a fresh
+ * snapshot at its own start and is guaranteed to see all previously
+ * committed review changes.
  */
 @Injectable()
 export class TradeRatingService {
@@ -24,6 +28,9 @@ export class TradeRatingService {
     tx: Prisma.TransactionClient,
     tradePostId: string,
   ): Promise<void> {
+    await tx.$executeRaw`
+      SELECT id FROM "TradePost" WHERE id = ${tradePostId} FOR UPDATE`;
+
     await tx.$executeRaw`
       UPDATE "TradePost" SET
         "averageRating" = COALESCE((

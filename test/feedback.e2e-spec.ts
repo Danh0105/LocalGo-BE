@@ -1,6 +1,7 @@
 import { type INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import sharp from 'sharp';
 import type { App } from 'supertest/types';
 import {
   FeedbackChannelCategory,
@@ -10,12 +11,22 @@ import {
 import { PrismaService } from '../src/database/prisma.service';
 import { createTestApp } from './utils/create-test-app';
 
+/** Minimal buffer whose first bytes satisfy the hand-rolled `ftyp` sniff in
+ * detectVideoMimeType — content beyond byte 12 is irrelevant to detection. */
+function fakeMp4Buffer(size = 64): Buffer {
+  const buffer = Buffer.alloc(size);
+  buffer.write('ftyp', 4, 'ascii');
+  buffer.write('mp42', 8, 'ascii');
+  return buffer;
+}
+
 describe('Feedback (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   const marker = randomUUID();
   const prefix = `feedback-${marker}`;
   const userIds: string[] = [];
+  const uploadedMediaIds: string[] = [];
 
   const ids = {
     first: `${prefix}-first`,
@@ -130,6 +141,11 @@ describe('Feedback (e2e)', () => {
     await prisma.media.deleteMany({
       where: { storageKey: { startsWith: prefix } },
     });
+    if (uploadedMediaIds.length > 0) {
+      await prisma.media.deleteMany({
+        where: { id: { in: uploadedMediaIds } },
+      });
+    }
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await app.close();
   });
@@ -293,6 +309,18 @@ describe('Feedback (e2e)', () => {
       expect(stored).not.toBeNull();
       expect(stored?.status).toBe(FeedbackTicketStatus.NEW);
       expect(stored?.fullName).toBe(`Người Kiểm Thử ${marker}`);
+    });
+
+    it('also accepts submission at /feedback/tickets/me (mini-app client path mismatch)', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets/me')
+        .send(ticketBody({ fullName: `Qua Duong Dan Me ${marker}` }))
+        .expect(201);
+      expect(response.body.data.success).toBe(true);
+      const stored = await prisma.feedbackTicket.findFirst({
+        where: { ticketCode: response.body.data.ticketCode },
+      });
+      expect(stored?.fullName).toBe(`Qua Duong Dan Me ${marker}`);
     });
 
     it('rejects missing fullName/phone/content or an invalid phone format', async () => {
@@ -476,6 +504,97 @@ describe('Feedback (e2e)', () => {
         .expect(200);
       expect(detail.body.data.fullName).toBe(`Chi Tiết ${marker}`);
       expect(detail.body.data.phone).toBe('0933444555');
+    });
+
+    it('uploads image + video attachments anonymously and attaches them to a submitted ticket', async () => {
+      const pngBuffer = await sharp({
+        create: { width: 4, height: 4, channels: 3, background: '#fff' },
+      })
+        .png()
+        .toBuffer();
+
+      const uploadRes = await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets/attachments')
+        .attach('files', pngBuffer, 'anh.png')
+        .attach('files', fakeMp4Buffer(), 'video.mp4')
+        .expect(201);
+
+      expect(uploadRes.body.data).toHaveLength(2);
+      const [image, video] = uploadRes.body.data as Array<{
+        id: string;
+        mimeType: string;
+        url: string;
+      }>;
+      expect(image.mimeType).toBe('image/webp');
+      expect(video.mimeType).toBe('video/mp4');
+      uploadedMediaIds.push(image.id, video.id);
+
+      const submitted = await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets')
+        .send(
+          ticketBody({
+            fullName: `Có Đính Kèm ${marker}`,
+            mediaIds: [image.id, video.id],
+          }),
+        )
+        .expect(201);
+
+      const admin = await login('ticket-attachment-admin', UserRole.ADMIN);
+      const ticket = await prisma.feedbackTicket.findFirstOrThrow({
+        where: { ticketCode: submitted.body.data.ticketCode as string },
+      });
+      const detail = await request(app.getHttpServer())
+        .get(`/api/v1/admin/feedback/tickets/${ticket.id}`)
+        .set('Authorization', `Bearer ${admin.token}`)
+        .expect(200);
+      expect(detail.body.data.attachments).toHaveLength(2);
+      const mimeTypes = (
+        detail.body.data.attachments as Array<{ mimeType: string }>
+      ).map((a) => a.mimeType);
+      expect(mimeTypes).toEqual(
+        expect.arrayContaining(['image/webp', 'video/mp4']),
+      );
+    });
+
+    it('rejects a video attachment over 50MB', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets/attachments')
+        .attach('files', fakeMp4Buffer(51 * 1024 * 1024), 'too-big.mp4')
+        .expect(400);
+    }, 30000);
+
+    it('rejects an attachment that is neither a recognized image nor video', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets/attachments')
+        .attach('files', Buffer.from('not a real media file'), 'x.txt')
+        .expect(400);
+    });
+
+    it('rejects submitting a ticket with more than 10 mediaIds', async () => {
+      const tooMany = Array.from({ length: 11 }, () => randomUUID());
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets')
+        .send(
+          ticketBody({
+            fullName: `Qua Nhieu Dinh Kem ${marker}`,
+            mediaIds: tooMany,
+          }),
+        )
+        .expect(400);
+      expect(response.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('rejects submitting a ticket with a mediaId that does not exist or was already used', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets')
+        .send(
+          ticketBody({
+            fullName: `Dinh Kem Sai ${marker}`,
+            mediaIds: [randomUUID()],
+          }),
+        )
+        .expect(400);
+      expect(response.body.error.code).toBe('INVALID_FEEDBACK_ATTACHMENT');
     });
   });
 });

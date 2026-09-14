@@ -34,7 +34,11 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
     if (role !== UserRole.USER) {
       await prisma.user.update({ where: { id: user.id }, data: { role } });
     }
-    return { id: user.id, token: response.body.data.accessToken as string };
+    return {
+      id: user.id,
+      zaloId,
+      token: response.body.data.accessToken as string,
+    };
   }
 
   async function getTradePostCategoryId(code: string): Promise<string> {
@@ -215,6 +219,7 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
         contactPhone: '0901234567',
         contactEmail: 'individual@example.com',
         address: 'Tây Ninh',
+        zaloId: `zalo-${randomUUID().slice(0, 20)}`,
         documents: [
           { mediaId: randomUUID(), type: 'OTHER', name: 'other.jpg' },
         ],
@@ -239,6 +244,7 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
         legalName: 'Công ty ABC',
         representativeName: 'Nguyễn A',
         representativeTitle: 'Giám đốc',
+        zaloId: `zalo-${randomUUID().slice(0, 20)}`,
         documents: [
           { mediaId: randomUUID(), type: 'OTHER', name: 'other.pdf' },
         ],
@@ -270,6 +276,7 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
         taxCode: '3901234567',
         representativeName: 'Nguyễn A',
         representativeTitle: 'Giám đốc',
+        zaloId: `zalo-${randomUUID().slice(0, 20)}`,
         documents: [
           {
             mediaId: randomUUID(),

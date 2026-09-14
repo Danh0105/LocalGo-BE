@@ -1,15 +1,20 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
   FeedbackTicketStatus,
+  MediaResourceType,
   Prisma,
   type FeedbackChannelCategory,
   type FeedbackTicket,
+  type Media,
   type User,
 } from '../../../../generated/prisma';
 import { ErrorCode } from '../../../common/constants/error-codes.constant';
 import { AppException } from '../../../common/exceptions/app.exception';
 import { paginate } from '../../../common/pagination/pagination.util';
 import { PrismaService } from '../../../database/prisma.service';
+import { MediaEntity } from '../../media/entities/media.entity';
+import { MediaResponseDto } from '../../media/dto/media-response.dto';
+import { MediaService } from '../../media/services/media.service';
 import { LookupFeedbackTicketDto } from '../dto/lookup-feedback-ticket.dto';
 import { QueryFeedbackTicketAdminDto } from '../dto/query-feedback-ticket.dto';
 import { SubmitFeedbackTicketDto } from '../dto/submit-feedback-ticket.dto';
@@ -23,12 +28,16 @@ import { FEEDBACK_CHANNEL_CATEGORY_FROM_DB } from '../feedback-channel.constants
 import {
   FEEDBACK_TICKET_STATUS_FROM_DB,
   FEEDBACK_TICKET_STATUS_TO_DB,
+  MAX_FEEDBACK_ATTACHMENTS,
 } from '../feedback-ticket.constants';
 import { isValidFeedbackTicketTransition } from '../utils/feedback-ticket-transitions.util';
 import { generateTicketCode } from '../utils/ticket-code.util';
 
+type FeedbackTicketMediaRecord = { media: Media };
+
 type FeedbackTicketRecord = FeedbackTicket & {
   handledBy: Pick<User, 'displayName'> | null;
+  media: FeedbackTicketMediaRecord[];
 };
 
 type FeedbackTicketLookupRecord = FeedbackTicket & {
@@ -37,11 +46,24 @@ type FeedbackTicketLookupRecord = FeedbackTicket & {
     title: string;
     category: FeedbackChannelCategory;
   } | null;
+  media: FeedbackTicketMediaRecord[];
 };
 
 const includeFeedbackTicket = {
   handledBy: { select: { displayName: true } },
+  media: {
+    orderBy: { sortOrder: Prisma.SortOrder.asc },
+    include: { media: true },
+  },
 };
+
+function toAttachmentDtos(
+  records: FeedbackTicketMediaRecord[],
+): MediaResponseDto[] {
+  return records.map((record) =>
+    MediaResponseDto.fromEntity(new MediaEntity(record.media)),
+  );
+}
 
 /** Strips incidental whitespace so "090 123 4567" matches "0901234567". */
 function normalizePhone(phone: string): string {
@@ -52,7 +74,16 @@ const MAX_TICKET_CODE_ATTEMPTS = 5;
 
 @Injectable()
 export class FeedbackTicketService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mediaService: MediaService,
+  ) {}
+
+  /** Public, anonymous upload of a feedback-ticket attachment (image or video). */
+  async uploadAttachment(buffer: Buffer): Promise<MediaResponseDto> {
+    const media = await this.mediaService.uploadFeedbackAttachment({ buffer });
+    return MediaResponseDto.fromEntity(media);
+  }
 
   async submit(
     dto: SubmitFeedbackTicketDto,
@@ -70,18 +101,62 @@ export class FeedbackTicketService {
       }
     }
 
+    const mediaIds = dto.mediaIds ?? [];
+    if (mediaIds.length > MAX_FEEDBACK_ATTACHMENTS) {
+      throw new AppException(
+        ErrorCode.UPLOAD_LIMIT_EXCEEDED,
+        `Tối đa ${MAX_FEEDBACK_ATTACHMENTS} ảnh/video cho mỗi phản hồi`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     for (let attempt = 0; attempt < MAX_TICKET_CODE_ATTEMPTS; attempt++) {
       const ticketCode = generateTicketCode();
       try {
-        await this.prisma.feedbackTicket.create({
-          data: {
-            ticketCode,
-            channelId: dto.channelId ?? null,
-            fullName: dto.fullName,
-            phone: dto.phone,
-            content: dto.content,
-            status: FeedbackTicketStatus.NEW,
-          },
+        await this.prisma.$transaction(async (tx) => {
+          const created = await tx.feedbackTicket.create({
+            data: {
+              ticketCode,
+              channelId: dto.channelId ?? null,
+              fullName: dto.fullName,
+              phone: dto.phone,
+              content: dto.content,
+              status: FeedbackTicketStatus.NEW,
+            },
+          });
+
+          if (mediaIds.length > 0) {
+            // Only claims media that are still unclaimed — if a concurrent
+            // submit already claimed one of these ids, `claimed.count` comes
+            // up short and the whole transaction (including the ticket row
+            // just created) rolls back rather than leaving a media row
+            // attached to two tickets.
+            const claimed = await tx.media.updateMany({
+              where: {
+                id: { in: mediaIds },
+                deletedAt: null,
+                resourceType: null,
+              },
+              data: {
+                resourceType: MediaResourceType.FEEDBACK_TICKET,
+                resourceId: created.id,
+              },
+            });
+            if (claimed.count !== mediaIds.length) {
+              throw new AppException(
+                ErrorCode.INVALID_FEEDBACK_ATTACHMENT,
+                'Một hoặc nhiều tệp đính kèm không hợp lệ hoặc đã được sử dụng, vui lòng tải lên lại',
+                HttpStatus.BAD_REQUEST,
+              );
+            }
+            await tx.feedbackTicketMedia.createMany({
+              data: mediaIds.map((mediaId, index) => ({
+                ticketId: created.id,
+                mediaId,
+                sortOrder: index,
+              })),
+            });
+          }
         });
         return { success: true, ticketCode };
       } catch (error) {
@@ -108,6 +183,7 @@ export class FeedbackTicketService {
       where: { ticketCode: dto.ticketCode.trim().toUpperCase() },
       include: {
         channel: { select: { id: true, title: true, category: true } },
+        media: includeFeedbackTicket.media,
       },
     });
     // Same 404 whether the code doesn't exist or the phone doesn't match it,
@@ -232,6 +308,7 @@ export class FeedbackTicketService {
           }
         : null,
       content: record.content,
+      attachments: toAttachmentDtos(record.media),
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       resolvedAt: record.resolvedAt,
@@ -251,6 +328,7 @@ export class FeedbackTicketService {
       status: FEEDBACK_TICKET_STATUS_FROM_DB[record.status],
       adminNote: record.adminNote,
       handledBy: record.handledBy?.displayName ?? null,
+      attachments: toAttachmentDtos(record.media),
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
       resolvedAt: record.resolvedAt,

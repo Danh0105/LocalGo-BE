@@ -1,12 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { MAX_FEEDBACK_ATTACHMENTS } from '../feedback-ticket.constants';
 
 const trim = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
@@ -42,4 +46,17 @@ export class SubmitFeedbackTicketDto {
   @MinLength(5)
   @MaxLength(5000)
   content: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    maxItems: MAX_FEEDBACK_ATTACHMENTS,
+    description:
+      'Danh sách id ảnh/video đã tải lên qua POST /feedback/tickets/attachments (tối đa 10)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_FEEDBACK_ATTACHMENTS)
+  @IsUUID('4', { each: true })
+  mediaIds?: string[];
 }

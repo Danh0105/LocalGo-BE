@@ -14,9 +14,16 @@ import { MediaService } from './services/media.service';
     MulterModule.registerAsync({
       useFactory: (configService: ConfigService) => {
         const mediaConfig = configService.getOrThrow<MediaConfig>('media');
+        // Sized for the largest accepted upload (feedback-ticket video
+        // attachments); per-type limits are still enforced in MediaService
+        // after the buffer is read.
+        const maxBytes =
+          Math.max(mediaConfig.maxImageSizeMb, mediaConfig.maxVideoSizeMb) *
+          1024 *
+          1024;
         return {
           storage: memoryStorage(),
-          limits: { fileSize: mediaConfig.maxImageSizeMb * 1024 * 1024 },
+          limits: { fileSize: maxBytes },
         };
       },
       inject: [ConfigService],

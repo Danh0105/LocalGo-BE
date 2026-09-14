@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { MediaResponseDto } from '../../media/dto/media-response.dto';
 import { FEEDBACK_TICKET_STATUSES } from '../feedback-ticket.constants';
 import type { FeedbackTicketStatusLabel } from '../feedback-ticket.constants';
 
@@ -33,6 +34,9 @@ export class FeedbackTicketLookupResponseDto {
 
   @ApiProperty()
   content: string;
+
+  @ApiProperty({ type: [MediaResponseDto] })
+  attachments: MediaResponseDto[];
 
   @ApiProperty()
   createdAt: Date;
@@ -71,6 +75,9 @@ export class FeedbackTicketAdminResponseDto {
 
   @ApiPropertyOptional({ nullable: true })
   handledBy: string | null;
+
+  @ApiProperty({ type: [MediaResponseDto] })
+  attachments: MediaResponseDto[];
 
   @ApiProperty()
   createdAt: Date;
