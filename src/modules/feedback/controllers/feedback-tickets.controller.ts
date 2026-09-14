@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
+  ApiBearerAuth,
   ApiBody,
   ApiConsumes,
   ApiOperation,
@@ -19,7 +20,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { Public } from '../../../common/decorators/public.decorator';
+import type { AuthenticatedUser } from '../../auth/types/authenticated-user.interface';
 import { MediaResponseDto } from '../../media/dto/media-response.dto';
 import { LookupFeedbackTicketDto } from '../dto/lookup-feedback-ticket.dto';
 import { SubmitFeedbackTicketDto } from '../dto/submit-feedback-ticket.dto';
@@ -36,10 +39,7 @@ export class FeedbackTicketsController {
   constructor(private readonly service: FeedbackTicketService) {}
 
   @Public()
-  // `me` is also accepted here (some mini-app client builds POST to
-  // `/feedback/tickets/me` instead of `/feedback/tickets`) so submissions
-  // aren't broken by that client-side path mismatch while it gets fixed.
-  @Post(['', 'me'])
+  @Post()
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({
@@ -50,6 +50,33 @@ export class FeedbackTicketsController {
     @Body() dto: SubmitFeedbackTicketDto,
   ): Promise<SubmitFeedbackTicketResponseDto> {
     return this.service.submit(dto);
+  }
+
+  @ApiBearerAuth()
+  @Get('me')
+  @ApiOperation({
+    summary: 'Danh sách phản hồi của người dùng đang đăng nhập',
+  })
+  @ApiResponse({ status: 200, type: [FeedbackTicketLookupResponseDto] })
+  listMine(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<FeedbackTicketLookupResponseDto[]> {
+    return this.service.listMine(user.id);
+  }
+
+  @ApiBearerAuth()
+  @Post('me')
+  @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Gửi một phản hồi mới và gắn với người dùng đang đăng nhập',
+  })
+  @ApiResponse({ status: 201, type: SubmitFeedbackTicketResponseDto })
+  submitMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SubmitFeedbackTicketDto,
+  ): Promise<SubmitFeedbackTicketResponseDto> {
+    return this.service.submitForUser(user.id, dto);
   }
 
   @Public()

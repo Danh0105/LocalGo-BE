@@ -264,6 +264,7 @@ model User {
   feedbackChannelsCreated       FeedbackChannel[]     @relation("FeedbackChannelCreator")
   feedbackChannelsUpdated       FeedbackChannel[]     @relation("FeedbackChannelUpdater")
   feedbackTicketsHandled        FeedbackTicket[]      @relation("FeedbackTicketHandler")
+  feedbackTicketsSubmitted      FeedbackTicket[]      @relation("FeedbackTicketSubmitter")
   mapPlacesCreated              MapPlace[]            @relation("MapPlaceCreator")
   mapPlacesUpdated              MapPlace[]            @relation("MapPlaceUpdater")
   contactsCreated               Contact[]             @relation("ContactCreator")
@@ -707,26 +708,29 @@ model FeedbackChannel {
 }
 
 model FeedbackTicket {
-  id          String               @id @default(uuid())
-  ticketCode  String               @unique
-  channelId   String?
-  fullName    String               @db.VarChar(150)
-  phone       String               @db.VarChar(30)
-  content     String               @db.VarChar(5000)
-  status      FeedbackTicketStatus @default(NEW)
-  adminNote   String?              @db.VarChar(2000)
-  handledById String?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  resolvedAt  DateTime?
+  id            String               @id @default(uuid())
+  ticketCode    String               @unique
+  channelId     String?
+  fullName      String               @db.VarChar(150)
+  phone         String               @db.VarChar(30)
+  content       String               @db.VarChar(5000)
+  status        FeedbackTicketStatus @default(NEW)
+  adminNote     String?              @db.VarChar(2000)
+  handledById   String?
+  submittedById String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  resolvedAt    DateTime?
 
-  channel   FeedbackChannel?      @relation(fields: [channelId], references: [id], onDelete: SetNull)
-  handledBy User?                 @relation("FeedbackTicketHandler", fields: [handledById], references: [id], onDelete: SetNull)
-  media     FeedbackTicketMedia[]
+  channel     FeedbackChannel?      @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  handledBy   User?                 @relation("FeedbackTicketHandler", fields: [handledById], references: [id], onDelete: SetNull)
+  submittedBy User?                 @relation("FeedbackTicketSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
+  media       FeedbackTicketMedia[]
 
   @@index([status, createdAt])
   @@index([channelId])
   @@index([phone])
+  @@index([submittedById, createdAt])
 }
 
 // Attachments (photos/videos) a citizen submits along with a feedback ticket.
@@ -734,13 +738,13 @@ model FeedbackTicket {
 // resourceType=FEEDBACK_TICKET/resourceId=ticket.id at submit time — same
 // unclaimed-then-claimed pattern used for BusinessApplicationDocument.
 model FeedbackTicketMedia {
-  id        String          @id @default(uuid())
+  id        String         @id @default(uuid())
   ticketId  String
-  ticket    FeedbackTicket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticket    FeedbackTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   mediaId   String
-  media     Media           @relation(fields: [mediaId], references: [id], onDelete: Cascade)
-  sortOrder Int             @default(0)
-  createdAt DateTime        @default(now())
+  media     Media          @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder Int            @default(0)
+  createdAt DateTime       @default(now())
 
   @@unique([ticketId, mediaId])
   @@index([ticketId, sortOrder])

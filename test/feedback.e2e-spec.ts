@@ -309,18 +309,67 @@ describe('Feedback (e2e)', () => {
       expect(stored).not.toBeNull();
       expect(stored?.status).toBe(FeedbackTicketStatus.NEW);
       expect(stored?.fullName).toBe(`Người Kiểm Thử ${marker}`);
+      expect(stored?.submittedById).toBeNull();
     });
 
-    it('also accepts submission at /feedback/tickets/me (mini-app client path mismatch)', async () => {
+    it('requires authentication for /feedback/tickets/me before validating the body', async () => {
+      await request(app.getHttpServer())
+        .get('/api/v1/feedback/tickets/me')
+        .expect(401);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets/me')
+        .send({})
+        .expect(401);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets/me')
+        .set('Authorization', 'Bearer definitely-invalid')
+        .send(ticketBody({ fullName: `Token Sai ${marker}` }))
+        .expect(401);
+    });
+
+    it('submits an authenticated ticket and lists only tickets submitted by that user', async () => {
+      const owner = await login('feedback-owner');
+      const other = await login('feedback-other');
+
       const response = await request(app.getHttpServer())
         .post('/api/v1/feedback/tickets/me')
-        .send(ticketBody({ fullName: `Qua Duong Dan Me ${marker}` }))
+        .set('Authorization', `Bearer ${owner.token}`)
+        .send(ticketBody({ fullName: `Chu Tai Khoan ${marker}` }))
         .expect(201);
       expect(response.body.data.success).toBe(true);
+
       const stored = await prisma.feedbackTicket.findFirst({
         where: { ticketCode: response.body.data.ticketCode },
       });
-      expect(stored?.fullName).toBe(`Qua Duong Dan Me ${marker}`);
+      expect(stored?.fullName).toBe(`Chu Tai Khoan ${marker}`);
+      expect(stored?.submittedById).toBe(owner.id);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets')
+        .send(ticketBody({ fullName: `An Danh ${marker}` }))
+        .expect(201);
+
+      const ownerList = await request(app.getHttpServer())
+        .get('/api/v1/feedback/tickets/me')
+        .set('Authorization', `Bearer ${owner.token}`)
+        .expect(200);
+      expect(
+        ownerList.body.data.map(
+          (ticket: { ticketCode: string }) => ticket.ticketCode,
+        ),
+      ).toContain(response.body.data.ticketCode);
+
+      const otherList = await request(app.getHttpServer())
+        .get('/api/v1/feedback/tickets/me')
+        .set('Authorization', `Bearer ${other.token}`)
+        .expect(200);
+      expect(
+        otherList.body.data.map(
+          (ticket: { ticketCode: string }) => ticket.ticketCode,
+        ),
+      ).not.toContain(response.body.data.ticketCode);
     });
 
     it('rejects missing fullName/phone/content or an invalid phone format', async () => {

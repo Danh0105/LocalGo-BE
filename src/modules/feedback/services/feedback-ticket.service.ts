@@ -88,6 +88,32 @@ export class FeedbackTicketService {
   async submit(
     dto: SubmitFeedbackTicketDto,
   ): Promise<SubmitFeedbackTicketResponseDto> {
+    return this.submitInternal(dto);
+  }
+
+  async submitForUser(
+    userId: string,
+    dto: SubmitFeedbackTicketDto,
+  ): Promise<SubmitFeedbackTicketResponseDto> {
+    return this.submitInternal(dto, userId);
+  }
+
+  async listMine(userId: string): Promise<FeedbackTicketLookupResponseDto[]> {
+    const records = await this.prisma.feedbackTicket.findMany({
+      where: { submittedById: userId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: {
+        channel: { select: { id: true, title: true, category: true } },
+        media: includeFeedbackTicket.media,
+      },
+    });
+    return records.map((record) => this.toLookupDto(record));
+  }
+
+  private async submitInternal(
+    dto: SubmitFeedbackTicketDto,
+    submittedById?: string,
+  ): Promise<SubmitFeedbackTicketResponseDto> {
     if (dto.channelId) {
       const channel = await this.prisma.feedbackChannel.findUnique({
         where: { id: dto.channelId },
@@ -122,6 +148,7 @@ export class FeedbackTicketService {
               phone: dto.phone,
               content: dto.content,
               status: FeedbackTicketStatus.NEW,
+              submittedById: submittedById ?? null,
             },
           });
 
