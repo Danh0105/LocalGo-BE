@@ -206,6 +206,69 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
     expect(response.body.error.code).toBe('USER_NOT_FOUND');
   });
 
+  it('lets an admin reset a user password and revokes active sessions', async () => {
+    const admin = await login('password-admin', UserRole.ADMIN);
+    const target = await login('password-target');
+    const email = `${marker}-password-target@example.com`;
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { email },
+    });
+    const activeBefore = await prisma.authSession.count({
+      where: { userId: target.id, revokedAt: null },
+    });
+    expect(activeBefore).toBeGreaterThan(0);
+
+    const response = await request(app.getHttpServer())
+      .patch(`/api/v1/admin/users/${target.id}/password`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ password: 'new-password-123' })
+      .expect(200);
+
+    expect(response.body.data.id).toBe(target.id);
+    expect(response.body.data).not.toHaveProperty('passwordHash');
+    const activeAfter = await prisma.authSession.count({
+      where: { userId: target.id, revokedAt: null },
+    });
+    expect(activeAfter).toBe(0);
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email, password: 'new-password-123' })
+      .expect(201);
+  });
+
+  it('validates reset password payload', async () => {
+    const admin = await login('invalid-password-admin', UserRole.ADMIN);
+    const target = await login('invalid-password-target');
+    const response = await request(app.getHttpServer())
+      .patch(`/api/v1/admin/users/${target.id}/password`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ password: 'short' })
+      .expect(400);
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 404 when resetting password of a nonexistent user', async () => {
+    const admin = await login('missing-password-admin', UserRole.ADMIN);
+    const response = await request(app.getHttpServer())
+      .patch(`/api/v1/admin/users/${randomUUID()}/password`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ password: 'new-password-123' })
+      .expect(404);
+    expect(response.body.error.code).toBe('USER_NOT_FOUND');
+  });
+
+  it('prevents a moderator from resetting an admin password', async () => {
+    const moderator = await login('password-moderator', UserRole.MODERATOR);
+    const admin = await login('password-protected-admin', UserRole.ADMIN);
+    const response = await request(app.getHttpServer())
+      .patch(`/api/v1/admin/users/${admin.id}/password`)
+      .set('Authorization', `Bearer ${moderator.token}`)
+      .send({ password: 'new-password-123' })
+      .expect(403);
+    expect(response.body.error.code).toBe('INSUFFICIENT_PERMISSION');
+  });
+
   it('validates required INDIVIDUAL identity fields and documents', async () => {
     const user = await login('invalid-individual');
     const response = await request(app.getHttpServer())

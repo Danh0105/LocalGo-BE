@@ -1,4 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
+import * as argon2 from 'argon2';
 import { UserRole, UserStatus } from '../../../../generated/prisma';
 import { ErrorCode } from '../../../common/constants/error-codes.constant';
 import { PaginatedResultDto } from '../../../common/dto/pagination-meta.dto';
@@ -67,6 +68,36 @@ export class UserAdminService {
       actorId: actor.id,
       target,
       status,
+    });
+    return new UserEntity(updated);
+  }
+
+  async updatePassword(
+    actor: AuthenticatedUser,
+    targetId: string,
+    password: string,
+  ): Promise<UserEntity> {
+    const target = await this.userRepository.findById(targetId);
+    if (!target) {
+      throw new AppException(
+        ErrorCode.USER_NOT_FOUND,
+        'Không tìm thấy người dùng',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (actor.role === UserRole.MODERATOR && target.role === UserRole.ADMIN) {
+      throw new AppException(
+        ErrorCode.INSUFFICIENT_PERMISSION,
+        'Kiểm duyệt viên không được đặt lại mật khẩu quản trị viên',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    const passwordHash = await argon2.hash(password);
+    const updated = await this.userRepository.updatePasswordAndRevokeSessions({
+      actorId: actor.id,
+      target,
+      passwordHash,
     });
     return new UserEntity(updated);
   }

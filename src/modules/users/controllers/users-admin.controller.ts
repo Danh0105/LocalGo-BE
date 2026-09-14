@@ -5,6 +5,7 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.interface';
 import { QueryAdminUsersDto } from '../dto/query-admin-users.dto';
+import { UpdateUserPasswordDto } from '../dto/update-user-password.dto';
 import { UpdateUserStatusDto } from '../dto/update-user-status.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
 import { UserAdminService } from '../services/user-admin.service';
@@ -37,6 +38,21 @@ export class UsersAdminController {
       actor,
       id,
       dto.status,
+    );
+    return UserResponseDto.fromEntity(user);
+  }
+
+  @Patch(':id/password')
+  @ApiOperation({ summary: '[Admin] Đặt lại mật khẩu người dùng' })
+  async updatePassword(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserPasswordDto,
+  ): Promise<UserResponseDto> {
+    const user = await this.userAdminService.updatePassword(
+      actor,
+      id,
+      dto.password,
     );
     return UserResponseDto.fromEntity(user);
   }

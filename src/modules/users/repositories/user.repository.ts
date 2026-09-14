@@ -106,4 +106,35 @@ export class UserRepository {
       return updated;
     });
   }
+
+  updatePasswordAndRevokeSessions(params: {
+    actorId: string;
+    target: User;
+    passwordHash: string;
+  }): Promise<User> {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: params.target.id },
+        data: { passwordHash: params.passwordHash },
+      });
+      await tx.authSession.updateMany({
+        where: { userId: params.target.id, revokedAt: null },
+        data: {
+          revokedAt: new Date(),
+          revokedReason: SessionRevokeReason.ADMIN_REVOKED,
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: params.actorId,
+          action: 'USER_PASSWORD_UPDATED',
+          resourceType: 'User',
+          resourceId: params.target.id,
+          oldData: { passwordHash: '[REDACTED]' },
+          newData: { passwordHash: '[REDACTED]' },
+        },
+      });
+      return updated;
+    });
+  }
 }
