@@ -72,6 +72,41 @@ export class UserAdminService {
     return new UserEntity(updated);
   }
 
+  async updateRole(
+    actor: AuthenticatedUser,
+    targetId: string,
+    role: UserRole,
+  ): Promise<UserEntity> {
+    if (actor.id === targetId) {
+      throw new AppException(
+        ErrorCode.CANNOT_UPDATE_SELF_ROLE,
+        'Bạn không thể thay đổi vai trò của tài khoản đang đăng nhập.',
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (actor.role !== UserRole.ADMIN) {
+      throw new AppException(
+        ErrorCode.INSUFFICIENT_PERMISSION,
+        'Chỉ quản trị viên mới được thay đổi vai trò người dùng',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const target = await this.userRepository.findById(targetId);
+    if (!target) {
+      throw new AppException(
+        ErrorCode.USER_NOT_FOUND,
+        'Không tìm thấy người dùng',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    const updated = await this.userRepository.updateRole({
+      actorId: actor.id,
+      target,
+      role,
+    });
+    return new UserEntity(updated);
+  }
+
   async updatePassword(
     actor: AuthenticatedUser,
     targetId: string,

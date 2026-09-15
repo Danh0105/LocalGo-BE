@@ -6,6 +6,7 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.interface';
 import { QueryAdminUsersDto } from '../dto/query-admin-users.dto';
 import { UpdateUserPasswordDto } from '../dto/update-user-password.dto';
+import { UpdateUserRoleDto } from '../dto/update-user-role.dto';
 import { UpdateUserStatusDto } from '../dto/update-user-status.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
 import { UserAdminService } from '../services/user-admin.service';
@@ -39,6 +40,18 @@ export class UsersAdminController {
       id,
       dto.status,
     );
+    return UserResponseDto.fromEntity(user);
+  }
+
+  @Patch(':id/role')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: '[Admin] Thay đổi vai trò người dùng' })
+  async updateRole(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserRoleDto,
+  ): Promise<UserResponseDto> {
+    const user = await this.userAdminService.updateRole(actor, id, dto.role);
     return UserResponseDto.fromEntity(user);
   }
 

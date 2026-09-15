@@ -107,6 +107,30 @@ export class UserRepository {
     });
   }
 
+  updateRole(params: {
+    actorId: string;
+    target: User;
+    role: UserRole;
+  }): Promise<User> {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: params.target.id },
+        data: { role: params.role },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: params.actorId,
+          action: 'USER_ROLE_UPDATED',
+          resourceType: 'User',
+          resourceId: params.target.id,
+          oldData: { role: params.target.role },
+          newData: { role: params.role },
+        },
+      });
+      return updated;
+    });
+  }
+
   updatePasswordAndRevokeSessions(params: {
     actorId: string;
     target: User;
