@@ -356,18 +356,23 @@ describe('Feedback (e2e)', () => {
         .set('Authorization', `Bearer ${owner.token}`)
         .expect(200);
       expect(
-        ownerList.body.data.map(
-          (ticket: { ticketCode: string }) => ticket.ticketCode,
+        (ownerList.body.data as Array<{ ticketCode: string }>).map(
+          (ticket) => ticket.ticketCode,
         ),
       ).toContain(response.body.data.ticketCode);
+      const listedTicket = (
+        ownerList.body.data as Array<{ id: string; ticketCode: string }>
+      ).find((ticket) => ticket.ticketCode === response.body.data.ticketCode);
+      expect(listedTicket?.id).toBe(stored?.id);
+      expect(listedTicket?.id).toBeTruthy();
 
       const otherList = await request(app.getHttpServer())
         .get('/api/v1/feedback/tickets/me')
         .set('Authorization', `Bearer ${other.token}`)
         .expect(200);
       expect(
-        otherList.body.data.map(
-          (ticket: { ticketCode: string }) => ticket.ticketCode,
+        (otherList.body.data as Array<{ ticketCode: string }>).map(
+          (ticket) => ticket.ticketCode,
         ),
       ).not.toContain(response.body.data.ticketCode);
     });
@@ -510,6 +515,13 @@ describe('Feedback (e2e)', () => {
         where: { ticketCode: submitted.body.data.ticketCode as string },
       });
 
+      const noted = await request(app.getHttpServer())
+        .patch(`/api/v1/admin/feedback/tickets/${ticket.id}/status`)
+        .set('Authorization', `Bearer ${admin.token}`)
+        .send({ status: 'new', adminNote: 'Ghi chú nội bộ ban đầu.' })
+        .expect(200);
+      expect(noted.body.data.adminNote).toBe('Ghi chú nội bộ ban đầu.');
+
       await request(app.getHttpServer())
         .patch(`/api/v1/admin/feedback/tickets/${ticket.id}/status`)
         .set('Authorization', `Bearer ${admin.token}`)
@@ -644,6 +656,202 @@ describe('Feedback (e2e)', () => {
         )
         .expect(400);
       expect(response.body.error.code).toBe('INVALID_FEEDBACK_ATTACHMENT');
+    });
+
+    it('creates a two-way text/image conversation for an anonymous sender and admin', async () => {
+      const submitted = await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets')
+        .send(
+          ticketBody({
+            fullName: `Hộp Thư Ẩn Danh ${marker}`,
+            phone: '0900 777 888',
+          }),
+        )
+        .expect(201);
+      const ticketCode = submitted.body.data.ticketCode as string;
+      const ticket = await prisma.feedbackTicket.findUniqueOrThrow({
+        where: { ticketCode },
+      });
+
+      const firstLookup = await request(app.getHttpServer())
+        .get('/api/v1/feedback/tickets/lookup')
+        .query({ ticketCode, phone: '0900777888' })
+        .expect(200);
+      expect(firstLookup.body.data.id).toBe(ticket.id);
+      expect(firstLookup.body.data.id).toBeTruthy();
+      expect(firstLookup.body.data.messages).toHaveLength(1);
+      expect(firstLookup.body.data.messages[0]).toMatchObject({
+        senderRole: 'user',
+        content: 'Nội dung phản hồi kiểm thử có độ dài hợp lệ.',
+      });
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/feedback/tickets/${ticketCode}/messages`)
+        .send({ phone: '0900000000', content: 'Không được phép.' })
+        .expect(404);
+
+      const pngBuffer = await sharp({
+        create: { width: 4, height: 4, channels: 3, background: '#128cff' },
+      })
+        .png()
+        .toBuffer();
+      const userUpload = await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets/attachments')
+        .attach('files', pngBuffer, 'nguoi-gui.png')
+        .expect(201);
+      const userMediaId = userUpload.body.data[0].id as string;
+      uploadedMediaIds.push(userMediaId);
+
+      const userReply = await request(app.getHttpServer())
+        .post(`/api/v1/feedback/tickets/${ticketCode}/messages`)
+        .send({
+          phone: '0900 777 888',
+          content: 'Tôi bổ sung ảnh hiện trường.',
+          mediaIds: [userMediaId],
+        })
+        .expect(201);
+      expect(userReply.body.data.senderRole).toBe('user');
+      expect(userReply.body.data.attachments).toHaveLength(1);
+
+      const admin = await login('conversation-admin', UserRole.ADMIN);
+      const adminUpload = await request(app.getHttpServer())
+        .post('/api/v1/media/images')
+        .set('Authorization', `Bearer ${admin.token}`)
+        .attach('file', pngBuffer, 'admin-tra-loi.png')
+        .expect(201);
+      const adminMediaId = adminUpload.body.data.id as string;
+      uploadedMediaIds.push(adminMediaId);
+
+      const adminReply = await request(app.getHttpServer())
+        .post(`/api/v1/admin/feedback/tickets/${ticket.id}/messages`)
+        .set('Authorization', `Bearer ${admin.token}`)
+        .send({
+          content: 'Đã tiếp nhận, đây là ảnh phản hồi từ cơ quan xử lý.',
+          mediaIds: [adminMediaId],
+        })
+        .expect(201);
+      expect(adminReply.body.data.senderRole).toBe('admin');
+      expect(adminReply.body.data.attachments).toHaveLength(1);
+
+      const finalLookup = await request(app.getHttpServer())
+        .get('/api/v1/feedback/tickets/lookup')
+        .query({ ticketCode, phone: '0900777888' })
+        .expect(200);
+      expect(
+        (finalLookup.body.data.messages as Array<{ senderRole: string }>).map(
+          (message) => message.senderRole,
+        ),
+      ).toEqual(['user', 'user', 'admin']);
+      expect(finalLookup.body.data.status).toBe('in_progress');
+    });
+
+    it('enforces authenticated ticket ownership and blocks messages after closing', async () => {
+      const owner = await login('conversation-owner');
+      const other = await login('conversation-intruder');
+      const admin = await login('conversation-close-admin', UserRole.ADMIN);
+      const submitted = await request(app.getHttpServer())
+        .post('/api/v1/feedback/tickets/me')
+        .set('Authorization', `Bearer ${owner.token}`)
+        .send(ticketBody({ fullName: `Hộp Thư Tài Khoản ${marker}` }))
+        .expect(201);
+      const ticketCode = submitted.body.data.ticketCode as string;
+      const ticket = await prisma.feedbackTicket.findUniqueOrThrow({
+        where: { ticketCode },
+      });
+
+      await request(app.getHttpServer())
+        .get(`/api/v1/feedback/tickets/${ticket.id}/messages`)
+        .expect(401);
+
+      await request(app.getHttpServer())
+        .get(`/api/v1/feedback/tickets/${ticket.id}/messages`)
+        .set('Authorization', `Bearer ${other.token}`)
+        .expect(404);
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/feedback/tickets/${ticket.id}/messages`)
+        .set('Authorization', `Bearer ${other.token}`)
+        .send({ content: 'Tài khoản khác không được gửi.' })
+        .expect(404);
+
+      const ownerMessages = await request(app.getHttpServer())
+        .get(`/api/v1/feedback/tickets/${ticket.id}/messages`)
+        .set('Authorization', `Bearer ${owner.token}`)
+        .expect(200);
+      expect(ownerMessages.body.data).toHaveLength(1);
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/feedback/tickets/${ticket.id}/messages`)
+        .set('Authorization', `Bearer ${owner.token}`)
+        .send({ content: 'Chủ phiếu có thể bổ sung.' })
+        .expect(201);
+
+      const staffNotifications = await prisma.notification.findMany({
+        where: {
+          userId: admin.id,
+          type: 'FEEDBACK_MESSAGE_RECEIVED',
+        },
+      });
+      expect(
+        staffNotifications.filter(
+          (notification) =>
+            (
+              notification.data as {
+                feedbackTicketId?: string;
+              } | null
+            )?.feedbackTicketId === ticket.id,
+        ),
+      ).toHaveLength(2);
+
+      const adminReply = await request(app.getHttpServer())
+        .post(`/api/v1/admin/feedback/tickets/${ticket.id}/messages`)
+        .set('Authorization', `Bearer ${admin.token}`)
+        .send({ content: 'Quản trị viên đã tiếp nhận phản hồi.' })
+        .expect(201);
+
+      const ownerNotifications = await prisma.notification.findMany({
+        where: {
+          userId: owner.id,
+          type: 'FEEDBACK_MESSAGE_RECEIVED',
+        },
+      });
+      const ownerNotification = ownerNotifications.find(
+        (notification) =>
+          (
+            notification.data as {
+              feedbackTicketId?: string;
+            } | null
+          )?.feedbackTicketId === ticket.id,
+      );
+      expect(ownerNotification?.data).toMatchObject({
+        feedbackTicketId: ticket.id,
+        feedbackMessageId: adminReply.body.data.id,
+        ticketCode,
+      });
+
+      await request(app.getHttpServer())
+        .post(`/api/v1/feedback/tickets/${ticket.id}/realtime/read`)
+        .set('Authorization', `Bearer ${other.token}`)
+        .expect(404);
+
+      const read = await request(app.getHttpServer())
+        .post(`/api/v1/feedback/tickets/${ticket.id}/realtime/read`)
+        .set('Authorization', `Bearer ${owner.token}`)
+        .expect(201);
+      expect(read.body.data.success).toBe(true);
+
+      await request(app.getHttpServer())
+        .patch(`/api/v1/admin/feedback/tickets/${ticket.id}/status`)
+        .set('Authorization', `Bearer ${admin.token}`)
+        .send({ status: 'closed' })
+        .expect(200);
+
+      const closedReply = await request(app.getHttpServer())
+        .post(`/api/v1/feedback/tickets/${ticket.id}/messages`)
+        .set('Authorization', `Bearer ${owner.token}`)
+        .send({ content: 'Không thể gửi sau khi đóng.' })
+        .expect(409);
+      expect(closedReply.body.error.code).toBe('FEEDBACK_CONVERSATION_CLOSED');
     });
   });
 });

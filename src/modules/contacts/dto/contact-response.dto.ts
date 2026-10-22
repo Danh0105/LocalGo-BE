@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { ContactCategoryLabel } from '../contact.constants';
+import { GalleryImageResponseDto } from '../../media/dto/gallery-image-response.dto';
 
 export class ContactListItemResponseDto {
   @ApiProperty()
@@ -24,6 +25,9 @@ export class ContactListItemResponseDto {
 
   @ApiProperty()
   address: string;
+
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
 
   @ApiProperty()
   workingTime: string;
@@ -53,11 +57,17 @@ export class ContactResponseDto extends ContactListItemResponseDto {
 
   @ApiProperty()
   note: string;
+
+  @ApiProperty({ type: [GalleryImageResponseDto] })
+  galleryImages: GalleryImageResponseDto[];
 }
 
 export class ContactAdminResponseDto extends ContactResponseDto {
   @ApiPropertyOptional({ nullable: true })
   mediaId: string | null;
+
+  @ApiProperty({ type: [String] })
+  galleryMediaIds: string[];
 
   @ApiProperty()
   isActive: boolean;

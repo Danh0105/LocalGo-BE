@@ -57,6 +57,7 @@ export class RealZaloAuthProvider implements ZaloAuthProvider {
     let response: Response;
     try {
       response = await fetch(url, {
+        signal: AbortSignal.timeout(10_000),
         headers: {
           access_token: accessToken,
           secret_key: this.appSecret,

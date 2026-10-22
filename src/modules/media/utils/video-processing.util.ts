@@ -22,10 +22,7 @@ export const VIDEO_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
  * files start with the EBML magic number 0x1A45DFA3.
  */
 export function detectVideoMimeType(buffer: Buffer): string | undefined {
-  if (
-    buffer.length >= 12 &&
-    buffer.toString('ascii', 4, 8) === 'ftyp'
-  ) {
+  if (buffer.length >= 12 && buffer.toString('ascii', 4, 8) === 'ftyp') {
     const brand = buffer.toString('ascii', 8, 12).trim();
     return brand === 'qt' ? 'video/quicktime' : 'video/mp4';
   }

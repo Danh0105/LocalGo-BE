@@ -10,6 +10,7 @@ import type { JwtConfig } from '../../../config/jwt.config';
 export interface AccessTokenPayload {
   sub: string;
   role: UserRole;
+  cv: number;
 }
 
 export interface RefreshTokenPayload {

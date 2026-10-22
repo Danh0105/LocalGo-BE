@@ -1,4 +1,4 @@
-import { Controller, Get, Headers, Res } from '@nestjs/common';
+import { Controller, Get, Res } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
@@ -18,16 +18,14 @@ export class AboutController {
   @ApiResponse({ status: 200, type: AboutResponseDto })
   @ApiResponse({ status: 404, description: 'ABOUT_NOT_PUBLISHED' })
   async getPublished(
-    @Headers('if-none-match') ifNoneMatch: string | undefined,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<AboutResponseDto | void> {
+  ): Promise<AboutResponseDto> {
     const result = await this.service.getPublished();
+    // Express answers 304 itself when If-None-Match matches this ETag
+    // (req.fresh in res.send); ending the response here would make Nest's
+    // passthrough reply write a second time.
     response.setHeader('ETag', result.etag);
     response.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
-    if (ifNoneMatch === result.etag) {
-      response.status(304).end();
-      return;
-    }
     return result.data;
   }
 }

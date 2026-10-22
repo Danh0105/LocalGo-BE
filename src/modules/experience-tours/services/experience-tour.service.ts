@@ -1,8 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  ContentReviewTargetType,
   MediaResourceType,
   Prisma,
   type ExperienceTour,
+  type ExperienceTourImage,
   type Media,
   type User,
 } from '../../../../generated/prisma';
@@ -12,6 +14,7 @@ import { AppException } from '../../../common/exceptions/app.exception';
 import { slugify } from '../../../common/utils/slugify.util';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaService } from '../../media/services/media.service';
+import { ContentReviewService } from '../../content-reviews/services/content-review.service';
 import {
   ReorderExperienceToursDto,
   UpdateExperienceTourStatusDto,
@@ -36,12 +39,17 @@ import {
 
 type ExperienceTourRecord = ExperienceTour & {
   media: Media | null;
+  galleryImages: Array<ExperienceTourImage & { media: Media }>;
   createdBy: Pick<User, 'displayName'> | null;
   updatedBy: Pick<User, 'displayName'> | null;
 };
 
 const includeExperienceTour = {
   media: true,
+  galleryImages: {
+    orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }],
+    include: { media: true },
+  },
   createdBy: { select: { displayName: true } },
   updatedBy: { select: { displayName: true } },
 };
@@ -51,6 +59,7 @@ export class ExperienceTourService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly contentReviews: ContentReviewService,
   ) {}
 
   async publicList(
@@ -124,7 +133,15 @@ export class ExperienceTourService {
       select: { id: true },
     });
     if (duplicate) throw this.slugExists();
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds = dto.galleryMediaIds ?? [];
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.EXPERIENCE_TOUR,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_EXPERIENCE_TOUR_MEDIA,
+    });
     this.assertItineraryForActive(dto.isActive ?? true, dto.itinerary);
 
     const record = await this.prisma.$transaction(async (tx) => {
@@ -138,6 +155,7 @@ export class ExperienceTourService {
           startTime: dto.startTime,
           priceRange: dto.priceRange,
           meetingPoint: dto.meetingPoint,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           summary: dto.summary,
           description: dto.description,
           itinerary: dto.itinerary,
@@ -150,10 +168,26 @@ export class ExperienceTourService {
           isActive: dto.isActive ?? true,
           createdById: actorId,
           updatedById: actorId,
+          ...(galleryMediaIds.length === 0
+            ? {}
+            : {
+                galleryImages: {
+                  create: galleryMediaIds.map((mediaId, index) => ({
+                    mediaId,
+                    sortOrder: index,
+                  })),
+                },
+              }),
         },
         include: includeExperienceTour,
       });
-      await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.mediaService.claimContentImageSet(tx, {
+        mediaIds: [dto.mediaId, ...galleryMediaIds],
+        actorId,
+        resourceType: MediaResourceType.EXPERIENCE_TOUR,
+        resourceId: id,
+        errorCode: ErrorCode.INVALID_EXPERIENCE_TOUR_MEDIA,
+      });
       await tx.auditLog.create({
         data: {
           actorId,
@@ -174,13 +208,23 @@ export class ExperienceTourService {
     dto: UpdateExperienceTourDto,
   ): Promise<ExperienceTourAdminResponseDto> {
     const current = await this.findOrThrow(id);
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds =
+      dto.galleryMediaIds ??
+      current.galleryImages.map((image) => image.mediaId);
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.EXPERIENCE_TOUR,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_EXPERIENCE_TOUR_MEDIA,
+    });
     this.assertItineraryForActive(
       dto.isActive ?? current.isActive,
       dto.itinerary,
     );
 
-    const { record, deletedMediaId } = await this.prisma.$transaction(
+    const { record, deletedMediaIds } = await this.prisma.$transaction(
       async (tx) => {
         const updated = await tx.experienceTour.updateMany({
           where: { id, version: dto.version },
@@ -191,6 +235,9 @@ export class ExperienceTourService {
             startTime: dto.startTime,
             priceRange: dto.priceRange,
             meetingPoint: dto.meetingPoint,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             summary: dto.summary,
             description: dto.description,
             itinerary: dto.itinerary,
@@ -209,16 +256,38 @@ export class ExperienceTourService {
         });
         if (updated.count !== 1) throw await this.versionConflict(tx, id);
 
-        const deletedMediaId = await this.mediaService.releaseSingularMedia(
+        if (dto.galleryMediaIds !== undefined) {
+          await tx.experienceTourImage.deleteMany({
+            where: { experienceTourId: id },
+          });
+          if (galleryMediaIds.length > 0)
+            await tx.experienceTourImage.createMany({
+              data: galleryMediaIds.map((mediaId, index) => ({
+                experienceTourId: id,
+                mediaId,
+                sortOrder: index,
+              })),
+            });
+        }
+        await this.mediaService.claimContentImageSet(tx, {
+          mediaIds: [dto.mediaId, ...galleryMediaIds],
+          actorId,
+          resourceType: MediaResourceType.EXPERIENCE_TOUR,
+          resourceId: id,
+          errorCode: ErrorCode.INVALID_EXPERIENCE_TOUR_MEDIA,
+        });
+        const deletedMediaIds = await this.mediaService.releaseContentImageSet(
           tx,
           {
-            previousMediaId: current.mediaId,
-            nextMediaId: dto.mediaId ?? null,
+            previousMediaIds: [
+              current.mediaId,
+              ...current.galleryImages.map((image) => image.mediaId),
+            ],
+            nextMediaIds: [dto.mediaId, ...galleryMediaIds],
             resourceType: MediaResourceType.EXPERIENCE_TOUR,
             resourceId: id,
           },
         );
-        await this.claimMedia(tx, dto.mediaId, actorId, id);
         await tx.auditLog.create({
           data: {
             actorId,
@@ -233,10 +302,10 @@ export class ExperienceTourService {
           where: { id },
           include: includeExperienceTour,
         });
-        return { record, deletedMediaId };
+        return { record, deletedMediaIds };
       },
     );
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
     return this.toAdminDto(record);
   }
 
@@ -329,14 +398,25 @@ export class ExperienceTourService {
 
   async remove(actorId: string, id: string): Promise<void> {
     const current = await this.findOrThrow(id);
-    const deletedMediaId = await this.prisma.$transaction(async (tx) => {
+    const deletedMediaIds = await this.prisma.$transaction(async (tx) => {
       await tx.experienceTour.delete({ where: { id } });
-      const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
-        previousMediaId: current.mediaId,
-        nextMediaId: null,
-        resourceType: MediaResourceType.EXPERIENCE_TOUR,
-        resourceId: id,
-      });
+      const reviewMediaIds = await this.contentReviews.deleteForRecord(
+        tx,
+        ContentReviewTargetType.EXPERIENCE_TOUR,
+        id,
+      );
+      const deletedMediaIds = await this.mediaService.releaseContentImageSet(
+        tx,
+        {
+          previousMediaIds: [
+            current.mediaId,
+            ...current.galleryImages.map((image) => image.mediaId),
+          ],
+          nextMediaIds: [],
+          resourceType: MediaResourceType.EXPERIENCE_TOUR,
+          resourceId: id,
+        },
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -345,9 +425,9 @@ export class ExperienceTourService {
           resourceId: id,
         },
       });
-      return deletedMediaId;
+      return [...deletedMediaIds, ...reviewMediaIds];
     });
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
   }
 
   private async findOrThrow(id: string): Promise<ExperienceTourRecord> {
@@ -370,6 +450,7 @@ export class ExperienceTourService {
       startTime: record.startTime,
       priceRange: record.priceRange,
       meetingPoint: record.meetingPoint,
+      googleMapsUrl: record.googleMapsUrl,
       summary: record.summary,
       imageUrl: record.media?.originalUrl ?? null,
       imageAlt: record.imageAlt,
@@ -386,6 +467,12 @@ export class ExperienceTourService {
       included: this.readStringArray(record.included),
       note: record.note,
       contactPhone: record.contactPhone,
+      galleryImages: record.galleryImages.map((image) => ({
+        mediaId: image.mediaId,
+        imageUrl: image.media.originalUrl,
+        thumbnailUrl: image.media.thumbnailUrl,
+        sortOrder: image.sortOrder,
+      })),
     };
   }
 
@@ -395,6 +482,7 @@ export class ExperienceTourService {
     return {
       ...this.toPublicDto(record),
       mediaId: record.mediaId,
+      galleryMediaIds: record.galleryImages.map((image) => image.mediaId),
       isActive: record.isActive,
       version: record.version,
       createdAt: record.createdAt,

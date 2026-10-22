@@ -10,13 +10,20 @@ import {
   Matches,
   Min,
 } from 'class-validator';
-import { TradePostStatus } from '../../../../../generated/prisma';
+import {
+  TradePostPurpose,
+  TradePostStatus,
+} from '../../../../../generated/prisma';
 import { PaginationQueryDto } from '../../../../common/dto/pagination-query.dto';
 import {
   TRADE_POST_CATEGORY_CODE_PATTERN,
   normalizeTradePostCategoryCode,
 } from '../../categories/trade-post-category.constants';
-import { TRADE_POST_SORT_OPTIONS } from '../../trade.constants';
+import {
+  TRADE_POST_SECTIONS,
+  TRADE_POST_SORT_OPTIONS,
+  type TradePostSection,
+} from '../../trade.constants';
 
 export class QueryTradePostDto extends PaginationQueryDto {
   @ApiPropertyOptional({
@@ -61,6 +68,24 @@ export class QueryTradePostDto extends PaginationQueryDto {
   @Type(() => Boolean)
   @IsBoolean()
   featured?: boolean;
+
+  @ApiPropertyOptional({
+    enum: TradePostPurpose,
+    description:
+      'Lọc tin có lợi nhuận (COMMERCIAL) / phi lợi nhuận (NON_PROFIT)',
+  })
+  @IsOptional()
+  @IsEnum(TradePostPurpose)
+  purpose?: TradePostPurpose;
+
+  @ApiPropertyOptional({
+    enum: TRADE_POST_SECTIONS,
+    description:
+      'Tin hiển thị trong một mục nội dung, theo loại hình Business của người đăng: temples = Ban quản lý đền/miếu, specialties và agriculture = Chủ vườn, cuisine = Nhà hàng – quán ăn',
+  })
+  @IsOptional()
+  @IsIn(TRADE_POST_SECTIONS)
+  section?: TradePostSection;
 
   @ApiPropertyOptional({ enum: TRADE_POST_SORT_OPTIONS, default: 'newest' })
   @IsOptional()

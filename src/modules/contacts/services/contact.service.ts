@@ -3,6 +3,7 @@ import {
   MediaResourceType,
   Prisma,
   type Contact,
+  type ContactImage,
   type Media,
   type User,
 } from '../../../../generated/prisma';
@@ -33,12 +34,17 @@ import {
 
 type ContactRecord = Contact & {
   media: Media | null;
+  galleryImages: Array<ContactImage & { media: Media }>;
   createdBy: Pick<User, 'displayName'> | null;
   updatedBy: Pick<User, 'displayName'> | null;
 };
 
 const includeContact = {
   media: true,
+  galleryImages: {
+    orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }],
+    include: { media: true },
+  },
   createdBy: { select: { displayName: true } },
   updatedBy: { select: { displayName: true } },
 };
@@ -121,7 +127,15 @@ export class ContactService {
       select: { id: true },
     });
     if (duplicate) throw this.slugExists();
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds = dto.galleryMediaIds ?? [];
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.CONTACT,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_CONTACT_MEDIA,
+    });
 
     const record = await this.prisma.$transaction(async (tx) => {
       const sortOrder = dto.sortOrder ?? (await this.nextSortOrder(tx));
@@ -134,6 +148,7 @@ export class ContactService {
           phone: dto.phone,
           email: dto.email ?? null,
           address: dto.address,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           workingTime: dto.workingTime,
           summary: dto.summary,
           description: dto.description,
@@ -145,10 +160,26 @@ export class ContactService {
           isActive: dto.isActive ?? true,
           createdById: actorId,
           updatedById: actorId,
+          ...(galleryMediaIds.length === 0
+            ? {}
+            : {
+                galleryImages: {
+                  create: galleryMediaIds.map((mediaId, index) => ({
+                    mediaId,
+                    sortOrder: index,
+                  })),
+                },
+              }),
         },
         include: includeContact,
       });
-      await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.mediaService.claimContentImageSet(tx, {
+        mediaIds: [dto.mediaId, ...galleryMediaIds],
+        actorId,
+        resourceType: MediaResourceType.CONTACT,
+        resourceId: id,
+        errorCode: ErrorCode.INVALID_CONTACT_MEDIA,
+      });
       await tx.auditLog.create({
         data: {
           actorId,
@@ -169,9 +200,19 @@ export class ContactService {
     dto: UpdateContactDto,
   ): Promise<ContactAdminResponseDto> {
     const current = await this.findOrThrow(id);
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds =
+      dto.galleryMediaIds ??
+      current.galleryImages.map((image) => image.mediaId);
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.CONTACT,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_CONTACT_MEDIA,
+    });
 
-    const { record, deletedMediaId } = await this.prisma.$transaction(
+    const { record, deletedMediaIds } = await this.prisma.$transaction(
       async (tx) => {
         const updated = await tx.contact.updateMany({
           where: { id, version: dto.version },
@@ -182,6 +223,9 @@ export class ContactService {
             phone: dto.phone,
             email: dto.email ?? null,
             address: dto.address,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             workingTime: dto.workingTime,
             summary: dto.summary,
             description: dto.description,
@@ -199,16 +243,36 @@ export class ContactService {
         });
         if (updated.count !== 1) throw await this.versionConflict(tx, id);
 
-        const deletedMediaId = await this.mediaService.releaseSingularMedia(
+        if (dto.galleryMediaIds !== undefined) {
+          await tx.contactImage.deleteMany({ where: { contactId: id } });
+          if (galleryMediaIds.length > 0)
+            await tx.contactImage.createMany({
+              data: galleryMediaIds.map((mediaId, index) => ({
+                contactId: id,
+                mediaId,
+                sortOrder: index,
+              })),
+            });
+        }
+        await this.mediaService.claimContentImageSet(tx, {
+          mediaIds: [dto.mediaId, ...galleryMediaIds],
+          actorId,
+          resourceType: MediaResourceType.CONTACT,
+          resourceId: id,
+          errorCode: ErrorCode.INVALID_CONTACT_MEDIA,
+        });
+        const deletedMediaIds = await this.mediaService.releaseContentImageSet(
           tx,
           {
-            previousMediaId: current.mediaId,
-            nextMediaId: dto.mediaId ?? null,
+            previousMediaIds: [
+              current.mediaId,
+              ...current.galleryImages.map((image) => image.mediaId),
+            ],
+            nextMediaIds: [dto.mediaId, ...galleryMediaIds],
             resourceType: MediaResourceType.CONTACT,
             resourceId: id,
           },
         );
-        await this.claimMedia(tx, dto.mediaId, actorId, id);
         await tx.auditLog.create({
           data: {
             actorId,
@@ -223,10 +287,10 @@ export class ContactService {
           where: { id },
           include: includeContact,
         });
-        return { record, deletedMediaId };
+        return { record, deletedMediaIds };
       },
     );
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
     return this.toAdminDto(record);
   }
 
@@ -307,14 +371,20 @@ export class ContactService {
 
   async remove(actorId: string, id: string): Promise<void> {
     const current = await this.findOrThrow(id);
-    const deletedMediaId = await this.prisma.$transaction(async (tx) => {
+    const deletedMediaIds = await this.prisma.$transaction(async (tx) => {
       await tx.contact.delete({ where: { id } });
-      const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
-        previousMediaId: current.mediaId,
-        nextMediaId: null,
-        resourceType: MediaResourceType.CONTACT,
-        resourceId: id,
-      });
+      const deletedMediaIds = await this.mediaService.releaseContentImageSet(
+        tx,
+        {
+          previousMediaIds: [
+            current.mediaId,
+            ...current.galleryImages.map((image) => image.mediaId),
+          ],
+          nextMediaIds: [],
+          resourceType: MediaResourceType.CONTACT,
+          resourceId: id,
+        },
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -323,9 +393,9 @@ export class ContactService {
           resourceId: id,
         },
       });
-      return deletedMediaId;
+      return deletedMediaIds;
     });
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
   }
 
   private async findOrThrow(id: string): Promise<ContactRecord> {
@@ -346,6 +416,7 @@ export class ContactService {
       phone: record.phone,
       email: record.email,
       address: record.address,
+      googleMapsUrl: record.googleMapsUrl,
       workingTime: record.workingTime,
       summary: record.summary,
       imageUrl: record.media?.originalUrl ?? null,
@@ -361,6 +432,12 @@ export class ContactService {
       description: this.readStringArray(record.description),
       supportTopics: this.readStringArray(record.supportTopics),
       note: record.note,
+      galleryImages: record.galleryImages.map((image) => ({
+        mediaId: image.mediaId,
+        imageUrl: image.media.originalUrl,
+        thumbnailUrl: image.media.thumbnailUrl,
+        sortOrder: image.sortOrder,
+      })),
     };
   }
 
@@ -368,6 +445,7 @@ export class ContactService {
     return {
       ...this.toPublicDto(record),
       mediaId: record.mediaId,
+      galleryMediaIds: record.galleryImages.map((image) => image.mediaId),
       isActive: record.isActive,
       version: record.version,
       createdAt: record.createdAt,

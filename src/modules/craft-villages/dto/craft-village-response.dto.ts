@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { CraftVillageCategoryLabel } from '../craft-village.constants';
+import { GalleryImageResponseDto } from '../../media/dto/gallery-image-response.dto';
 
 export class CraftVillageListItemResponseDto {
   @ApiProperty()
@@ -20,6 +21,9 @@ export class CraftVillageListItemResponseDto {
 
   @ApiProperty()
   address: string;
+
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
 
   @ApiProperty()
   workingTime: string;
@@ -52,11 +56,17 @@ export class CraftVillageResponseDto extends CraftVillageListItemResponseDto {
 
   @ApiProperty()
   visitorNote: string;
+
+  @ApiProperty({ type: [GalleryImageResponseDto] })
+  galleryImages: GalleryImageResponseDto[];
 }
 
 export class CraftVillageAdminResponseDto extends CraftVillageResponseDto {
   @ApiPropertyOptional({ nullable: true })
   mediaId: string | null;
+
+  @ApiProperty({ type: [String] })
+  galleryMediaIds: string[];
 
   @ApiProperty()
   isActive: boolean;

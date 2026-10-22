@@ -2,6 +2,7 @@ import {
   BusinessApplicantType,
   BusinessApplicationStatus,
   BusinessDocumentType,
+  BusinessType,
 } from '../../../../generated/prisma';
 import { ErrorCode } from '../../../common/constants/error-codes.constant';
 import { AppException } from '../../../common/exceptions/app.exception';
@@ -31,11 +32,13 @@ describe('BusinessApplicationService validation and ownership', () => {
     pruneDetachedMedia: jest.fn(),
     purgeStorage: jest.fn(),
   };
+  const notifications = { notify: jest.fn() };
   const service = new BusinessApplicationService(
     repository as never,
     prisma as never,
     documentAccess as never,
     mediaService as never,
+    notifications as never,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -73,6 +76,109 @@ describe('BusinessApplicationService validation and ownership', () => {
         ErrorCode.INVALID_BUSINESS_APPLICATION,
       );
     }
+  });
+
+  describe('business type requirements', () => {
+    const identity = {
+      identityNumber: '079200000001',
+      identityIssuedAt: '2020-01-01',
+      identityIssuedPlace: 'Cục CS QLHC về TTXH',
+    };
+    const doc = (type: BusinessDocumentType, index: number) => ({
+      type,
+      mediaId: `00000000-0000-4000-8000-00000000000${index}`,
+      name: `${type}.jpg`,
+    });
+    const identityDocs = [
+      doc(BusinessDocumentType.IDENTITY_FRONT, 1),
+      doc(BusinessDocumentType.IDENTITY_BACK, 2),
+    ];
+
+    function expectInvalid(dto: Partial<UpsertBusinessApplicationDto>): string {
+      try {
+        service.validateByApplicantType({
+          ...common,
+          ...dto,
+        } as UpsertBusinessApplicationDto);
+      } catch (error) {
+        expect(error).toBeInstanceOf(AppException);
+        expect((error as AppException).code).toBe(
+          ErrorCode.INVALID_BUSINESS_APPLICATION,
+        );
+        return (error as AppException).message;
+      }
+      throw new Error('Expected validation to fail');
+    }
+
+    it('accepts a temple management board without tax code or business licence', () => {
+      expect(() =>
+        service.validateByApplicantType({
+          ...common,
+          ...identity,
+          businessType: BusinessType.TEMPLE_MANAGEMENT,
+          applicantType: BusinessApplicantType.ORGANIZATION,
+          templeName: 'Đền Bà',
+          representativeName: 'Nguyễn Văn B',
+          representativeTitle: 'Trưởng ban',
+          documents: [
+            ...identityDocs,
+            doc(BusinessDocumentType.MANAGEMENT_DECISION, 3),
+          ],
+        }),
+      ).not.toThrow();
+    });
+
+    it('requires the management decision document and temple name for a temple board', () => {
+      const message = expectInvalid({
+        ...identity,
+        businessType: BusinessType.TEMPLE_MANAGEMENT,
+        applicantType: BusinessApplicantType.ORGANIZATION,
+        representativeName: 'Nguyễn Văn B',
+        representativeTitle: 'Trưởng ban',
+        documents: identityDocs,
+      });
+      expect(message).toContain('Tên đền/chùa/miếu');
+      expect(message).toContain('quyết định công nhận Ban quản lý');
+    });
+
+    it('does not let a temple board register as an individual', () => {
+      expect(
+        expectInvalid({
+          businessType: BusinessType.TEMPLE_MANAGEMENT,
+          applicantType: BusinessApplicantType.INDIVIDUAL,
+        }),
+      ).toContain('tổ chức');
+    });
+
+    it('requires a business licence from an individual restaurant owner', () => {
+      expect(
+        expectInvalid({
+          ...identity,
+          businessType: BusinessType.RESTAURANT,
+          applicantType: BusinessApplicantType.INDIVIDUAL,
+          documents: identityDocs,
+        }),
+      ).toContain('đăng ký kinh doanh');
+    });
+
+    it('requires main products from a garden owner but no business licence', () => {
+      const base = {
+        ...common,
+        ...identity,
+        businessType: BusinessType.GARDEN,
+        applicantType: BusinessApplicantType.INDIVIDUAL,
+        documents: identityDocs,
+      };
+      expect(
+        expectInvalid(base as Partial<UpsertBusinessApplicationDto>),
+      ).toContain('Sản phẩm/cây trồng chính');
+      expect(() =>
+        service.validateByApplicantType({
+          ...base,
+          mainProducts: 'Sầu riêng, bưởi da xanh',
+        }),
+      ).not.toThrow();
+    });
   });
 
   it('does not allow a user to update another users rejected application', async () => {

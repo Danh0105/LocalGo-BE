@@ -1,8 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  ContentReviewTargetType,
   MediaResourceType,
   Prisma,
   type Festival,
+  type FestivalImage,
   type Media,
   type User,
 } from '../../../../generated/prisma';
@@ -12,6 +14,7 @@ import { AppException } from '../../../common/exceptions/app.exception';
 import { slugify } from '../../../common/utils/slugify.util';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaService } from '../../media/services/media.service';
+import { ContentReviewService } from '../../content-reviews/services/content-review.service';
 import {
   ReorderFestivalsDto,
   UpdateFestivalStatusDto,
@@ -36,12 +39,17 @@ import {
 
 type FestivalRecord = Festival & {
   media: Media | null;
+  galleryImages: Array<FestivalImage & { media: Media }>;
   createdBy: Pick<User, 'displayName'> | null;
   updatedBy: Pick<User, 'displayName'> | null;
 };
 
 const includeFestival = {
   media: true,
+  galleryImages: {
+    orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }],
+    include: { media: true },
+  },
   createdBy: { select: { displayName: true } },
   updatedBy: { select: { displayName: true } },
 };
@@ -51,6 +59,7 @@ export class FestivalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly contentReviews: ContentReviewService,
   ) {}
 
   async publicList(
@@ -124,7 +133,15 @@ export class FestivalService {
       select: { id: true },
     });
     if (duplicate) throw this.slugExists();
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds = dto.galleryMediaIds ?? [];
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.FESTIVAL,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_FESTIVAL_MEDIA,
+    });
 
     const record = await this.prisma.$transaction(async (tx) => {
       const sortOrder = dto.sortOrder ?? (await this.nextSortOrder(tx));
@@ -135,6 +152,7 @@ export class FestivalService {
           category: FESTIVAL_CATEGORY_TO_DB[dto.category],
           time: dto.time,
           location: dto.location,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           scale: dto.scale,
           summary: dto.summary,
           description: dto.description,
@@ -146,10 +164,26 @@ export class FestivalService {
           isActive: dto.isActive ?? true,
           createdById: actorId,
           updatedById: actorId,
+          ...(galleryMediaIds.length === 0
+            ? {}
+            : {
+                galleryImages: {
+                  create: galleryMediaIds.map((mediaId, index) => ({
+                    mediaId,
+                    sortOrder: index,
+                  })),
+                },
+              }),
         },
         include: includeFestival,
       });
-      await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.mediaService.claimContentImageSet(tx, {
+        mediaIds: [dto.mediaId, ...galleryMediaIds],
+        actorId,
+        resourceType: MediaResourceType.FESTIVAL,
+        resourceId: id,
+        errorCode: ErrorCode.INVALID_FESTIVAL_MEDIA,
+      });
       await tx.auditLog.create({
         data: {
           actorId,
@@ -170,9 +204,19 @@ export class FestivalService {
     dto: UpdateFestivalDto,
   ): Promise<FestivalAdminResponseDto> {
     const current = await this.findOrThrow(id);
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds =
+      dto.galleryMediaIds ??
+      current.galleryImages.map((image) => image.mediaId);
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.FESTIVAL,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_FESTIVAL_MEDIA,
+    });
 
-    const { record, deletedMediaId } = await this.prisma.$transaction(
+    const { record, deletedMediaIds } = await this.prisma.$transaction(
       async (tx) => {
         const updated = await tx.festival.updateMany({
           where: { id, version: dto.version },
@@ -181,6 +225,9 @@ export class FestivalService {
             category: FESTIVAL_CATEGORY_TO_DB[dto.category],
             time: dto.time,
             location: dto.location,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             scale: dto.scale,
             summary: dto.summary,
             description: dto.description,
@@ -198,16 +245,37 @@ export class FestivalService {
         });
         if (updated.count !== 1) throw await this.versionConflict(tx, id);
 
-        const deletedMediaId = await this.mediaService.releaseSingularMedia(
+        if (dto.galleryMediaIds !== undefined) {
+          await tx.festivalImage.deleteMany({ where: { festivalId: id } });
+          if (galleryMediaIds.length > 0) {
+            await tx.festivalImage.createMany({
+              data: galleryMediaIds.map((mediaId, index) => ({
+                festivalId: id,
+                mediaId,
+                sortOrder: index,
+              })),
+            });
+          }
+        }
+        await this.mediaService.claimContentImageSet(tx, {
+          mediaIds: [dto.mediaId, ...galleryMediaIds],
+          actorId,
+          resourceType: MediaResourceType.FESTIVAL,
+          resourceId: id,
+          errorCode: ErrorCode.INVALID_FESTIVAL_MEDIA,
+        });
+        const deletedMediaIds = await this.mediaService.releaseContentImageSet(
           tx,
           {
-            previousMediaId: current.mediaId,
-            nextMediaId: dto.mediaId ?? null,
+            previousMediaIds: [
+              current.mediaId,
+              ...current.galleryImages.map((image) => image.mediaId),
+            ],
+            nextMediaIds: [dto.mediaId, ...galleryMediaIds],
             resourceType: MediaResourceType.FESTIVAL,
             resourceId: id,
           },
         );
-        await this.claimMedia(tx, dto.mediaId, actorId, id);
         await tx.auditLog.create({
           data: {
             actorId,
@@ -222,10 +290,10 @@ export class FestivalService {
           where: { id },
           include: includeFestival,
         });
-        return { record, deletedMediaId };
+        return { record, deletedMediaIds };
       },
     );
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
     return this.toAdminDto(record);
   }
 
@@ -306,14 +374,25 @@ export class FestivalService {
 
   async remove(actorId: string, id: string): Promise<void> {
     const current = await this.findOrThrow(id);
-    const deletedMediaId = await this.prisma.$transaction(async (tx) => {
+    const deletedMediaIds = await this.prisma.$transaction(async (tx) => {
       await tx.festival.delete({ where: { id } });
-      const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
-        previousMediaId: current.mediaId,
-        nextMediaId: null,
-        resourceType: MediaResourceType.FESTIVAL,
-        resourceId: id,
-      });
+      const reviewMediaIds = await this.contentReviews.deleteForRecord(
+        tx,
+        ContentReviewTargetType.FESTIVAL,
+        id,
+      );
+      const deletedMediaIds = await this.mediaService.releaseContentImageSet(
+        tx,
+        {
+          previousMediaIds: [
+            current.mediaId,
+            ...current.galleryImages.map((image) => image.mediaId),
+          ],
+          nextMediaIds: [],
+          resourceType: MediaResourceType.FESTIVAL,
+          resourceId: id,
+        },
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -322,9 +401,9 @@ export class FestivalService {
           resourceId: id,
         },
       });
-      return deletedMediaId;
+      return [...deletedMediaIds, ...reviewMediaIds];
     });
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
   }
 
   private async findOrThrow(id: string): Promise<FestivalRecord> {
@@ -343,6 +422,7 @@ export class FestivalService {
       category: FESTIVAL_CATEGORY_FROM_DB[record.category],
       time: record.time,
       location: record.location,
+      googleMapsUrl: record.googleMapsUrl,
       scale: record.scale,
       summary: record.summary,
       imageUrl: record.media?.originalUrl ?? null,
@@ -358,6 +438,12 @@ export class FestivalService {
       description: this.readStringArray(record.description),
       activities: this.readStringArray(record.activities),
       note: record.note,
+      galleryImages: record.galleryImages.map((image) => ({
+        mediaId: image.mediaId,
+        imageUrl: image.media.originalUrl,
+        thumbnailUrl: image.media.thumbnailUrl,
+        sortOrder: image.sortOrder,
+      })),
     };
   }
 
@@ -365,6 +451,7 @@ export class FestivalService {
     return {
       ...this.toPublicDto(record),
       mediaId: record.mediaId,
+      galleryMediaIds: record.galleryImages.map((image) => image.mediaId),
       isActive: record.isActive,
       version: record.version,
       createdAt: record.createdAt,
@@ -377,67 +464,6 @@ export class FestivalService {
     return Array.isArray(value)
       ? value.filter((item): item is string => typeof item === 'string')
       : [];
-  }
-
-  private async validateMedia(
-    mediaId: string | null | undefined,
-    actorId: string,
-    festivalId: string,
-  ): Promise<void> {
-    if (!mediaId) return;
-    const media = await this.prisma.media.findFirst({
-      where: { id: mediaId, deletedAt: null },
-    });
-    const validImage = media?.mimeType.startsWith('image/');
-    const usable =
-      media &&
-      ((media.resourceType === null && media.ownerId === actorId) ||
-        (media.resourceType === MediaResourceType.FESTIVAL &&
-          (media.resourceId === festivalId || media.resourceId === null)));
-    if (!validImage || !usable) {
-      throw new AppException(
-        ErrorCode.INVALID_FESTIVAL_MEDIA,
-        'Ảnh không tồn tại hoặc không được phép sử dụng',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
-  private async claimMedia(
-    tx: Prisma.TransactionClient,
-    mediaId: string | null | undefined,
-    actorId: string,
-    festivalId: string,
-  ): Promise<void> {
-    if (!mediaId) return;
-    const claimed = await tx.media.updateMany({
-      where: {
-        id: mediaId,
-        ownerId: actorId,
-        resourceType: null,
-        deletedAt: null,
-      },
-      data: {
-        resourceType: MediaResourceType.FESTIVAL,
-        resourceId: festivalId,
-      },
-    });
-    if (claimed.count === 0) {
-      const existing = await tx.media.findFirst({
-        where: {
-          id: mediaId,
-          resourceType: MediaResourceType.FESTIVAL,
-          OR: [{ resourceId: festivalId }, { resourceId: null }],
-          deletedAt: null,
-        },
-      });
-      if (!existing)
-        throw new AppException(
-          ErrorCode.INVALID_FESTIVAL_MEDIA,
-          'Ảnh đã được nội dung khác sử dụng',
-          HttpStatus.CONFLICT,
-        );
-    }
   }
 
   private async nextSortOrder(tx: Prisma.TransactionClient): Promise<number> {

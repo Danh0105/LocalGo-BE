@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
+import { ContentReviewsModule } from '../content-reviews/content-reviews.module';
 import { MediaModule } from '../media/media.module';
 import { ExperienceToursAdminController } from './controllers/experience-tours-admin.controller';
 import { ExperienceToursController } from './controllers/experience-tours.controller';
 import { ExperienceTourService } from './services/experience-tour.service';
 
 @Module({
-  imports: [MediaModule],
+  imports: [MediaModule, ContentReviewsModule],
   controllers: [ExperienceToursController, ExperienceToursAdminController],
   providers: [ExperienceTourService],
   exports: [ExperienceTourService],

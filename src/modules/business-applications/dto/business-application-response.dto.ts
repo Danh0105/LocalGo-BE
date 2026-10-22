@@ -1,8 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type {
-  BusinessApplicantType,
-  BusinessApplicationStatus,
+import {
   BusinessDocumentType,
+  BusinessType,
+  type BusinessApplicantType,
+  type BusinessApplicationStatus,
 } from '../../../../generated/prisma';
 import type {
   BusinessApplicationEntity,
@@ -12,15 +13,7 @@ import type {
 export class BusinessApplicationDocumentResponseDto implements BusinessApplicationDocumentView {
   @ApiProperty() id: string;
   @ApiProperty() name: string;
-  @ApiProperty({
-    enum: [
-      'IDENTITY_FRONT',
-      'IDENTITY_BACK',
-      'BUSINESS_LICENSE',
-      'TAX_DOCUMENT',
-      'OTHER',
-    ],
-  })
+  @ApiProperty({ enum: BusinessDocumentType })
   type: BusinessDocumentType;
   @ApiProperty() url: string;
   @ApiProperty() mimeType: string;
@@ -30,8 +23,16 @@ export class BusinessApplicationResponseDto {
   @ApiProperty() id: string;
   @ApiProperty({ enum: ['INDIVIDUAL', 'ORGANIZATION'] })
   applicantType: BusinessApplicantType;
+  @ApiProperty({ enum: BusinessType })
+  businessType: BusinessType;
   @ApiProperty() businessName: string;
   @ApiProperty() businessCategory: string;
+  @ApiPropertyOptional({ nullable: true }) templeName: string | null;
+  @ApiPropertyOptional({ nullable: true }) openingHours: string | null;
+  @ApiPropertyOptional({ nullable: true }) seatingCapacity: number | null;
+  @ApiPropertyOptional({ nullable: true }) roomCount: number | null;
+  @ApiPropertyOptional({ nullable: true }) gardenArea: string | null;
+  @ApiPropertyOptional({ nullable: true }) mainProducts: string | null;
   @ApiProperty() contactName: string;
   @ApiProperty() contactPhone: string;
   @ApiProperty() contactEmail: string;
@@ -63,5 +64,25 @@ export class BusinessApplicationResponseDto {
     entity: BusinessApplicationEntity,
   ): BusinessApplicationResponseDto {
     return Object.assign(new BusinessApplicationResponseDto(), entity);
+  }
+}
+
+export class ApproveBusinessApplicationResponseDto extends BusinessApplicationResponseDto {
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Mật khẩu do hệ thống sinh, chỉ trả một lần khi tài khoản chưa có mật khẩu. Null nếu tài khoản đã có mật khẩu.',
+  })
+  initialPassword: string | null;
+
+  static fromApproval(
+    entity: BusinessApplicationEntity,
+    initialPassword: string | null,
+  ): ApproveBusinessApplicationResponseDto {
+    return Object.assign(
+      new ApproveBusinessApplicationResponseDto(),
+      BusinessApplicationResponseDto.fromEntity(entity),
+      { initialPassword },
+    );
   }
 }

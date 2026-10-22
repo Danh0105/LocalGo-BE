@@ -1,10 +1,12 @@
 import type {
+  BusinessType,
   Media,
   Prisma,
   TradePost,
   TradePostCategory,
   TradePostImage,
   TradePostPriceType,
+  TradePostPurpose,
   TradePostStatus,
   User,
   UserRole,
@@ -31,6 +33,7 @@ export interface TradePostOwnerView {
   phone: string | null;
   avatarUrl: string | null;
   role: UserRole;
+  businessType: BusinessType | null;
   status: UserStatus;
 }
 
@@ -38,7 +41,14 @@ export type TradePostWithOwner = TradePost & {
   category: TradePostCategory;
   owner: Pick<
     User,
-    'id' | 'displayName' | 'email' | 'phone' | 'avatarUrl' | 'role' | 'status'
+    | 'id'
+    | 'displayName'
+    | 'email'
+    | 'phone'
+    | 'avatarUrl'
+    | 'role'
+    | 'businessType'
+    | 'status'
   >;
 };
 
@@ -66,10 +76,12 @@ export class TradePostEntity {
   title: string;
   summary: string;
   description: string;
-  priceType: TradePostPriceType;
+  purpose: TradePostPurpose;
+  priceType: TradePostPriceType | null;
   price: Prisma.Decimal | null;
   priceLabel: string | null;
   address: string;
+  googleMapsUrl: string | null;
   lat: Prisma.Decimal | null;
   lng: Prisma.Decimal | null;
   contactName: string;
@@ -81,8 +93,11 @@ export class TradePostEntity {
   promotionPercent: number | null;
   promotionStartAt: Date | null;
   promotionEndAt: Date | null;
+  eventStartAt: Date | null;
+  eventEndAt: Date | null;
   expiresAt: Date | null;
   viewCount: number;
+  saveCount: number;
   averageRating: Prisma.Decimal;
   reviewCount: number;
   publishedAt: Date | null;
@@ -123,10 +138,12 @@ export class TradePostEntity {
     this.title = post.title;
     this.summary = post.summary;
     this.description = post.description;
+    this.purpose = post.purpose;
     this.priceType = post.priceType;
     this.price = post.price;
     this.priceLabel = post.priceLabel;
     this.address = post.address;
+    this.googleMapsUrl = post.googleMapsUrl;
     this.lat = post.lat;
     this.lng = post.lng;
     this.contactName = post.contactName;
@@ -138,8 +155,11 @@ export class TradePostEntity {
     this.promotionPercent = post.promotionPercent;
     this.promotionStartAt = post.promotionStartAt;
     this.promotionEndAt = post.promotionEndAt;
+    this.eventStartAt = post.eventStartAt;
+    this.eventEndAt = post.eventEndAt;
     this.expiresAt = post.expiresAt;
     this.viewCount = post.viewCount;
+    this.saveCount = post.saveCount;
     this.averageRating = post.averageRating;
     this.reviewCount = post.reviewCount;
     this.publishedAt = post.publishedAt;

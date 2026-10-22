@@ -2,7 +2,7 @@
 
 Backend REST API cho **LocalGo** — Zalo Mini App quảng bá địa phương, du lịch, giao thương và kết nối cộng đồng xã Truông Mít.
 
-> **Trạng thái: Phase 1** — nền tảng, xác thực (Zalo + email/mật khẩu), RBAC, upload ảnh, module giao thương (trade posts + reviews + rating) đã hoàn thành. 14 module nội dung địa phương (nông nghiệp, điểm tham quan, đền chùa, đặc sản, ...), Feedback, Favorites, Search, Admin dashboard sẽ được xây dựng ở các phase tiếp theo — xem `docs/frontend-backend-mapping.md` để biết chi tiết những gì đã/chưa xây.
+> **Trạng thái: Phase 1** — nền tảng, xác thực (Zalo + email/mật khẩu), RBAC, upload ảnh, module giao thương (trade posts + reviews + rating) và tìm kiếm toàn cục đã hoàn thành. 14 module nội dung địa phương (nông nghiệp, điểm tham quan, đền chùa, đặc sản, ...), Feedback, Favorites, Admin dashboard sẽ được xây dựng ở các phase tiếp theo — xem `docs/frontend-backend-mapping.md` để biết chi tiết những gì đã/chưa xây.
 
 ## 1. Giới thiệu
 
@@ -27,17 +27,17 @@ Frontend hiện tại (`F:\LocalGo`) dùng dữ liệu mẫu tĩnh cho toàn b�
 
 Sao chép `.env.example` thành `.env` (và `.env.test` cho môi trường test) rồi điền giá trị thật. Các biến quan trọng:
 
-| Biến                                              | Mô tả                                                                                            |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `DATABASE_URL`                                    | Connection string PostgreSQL                                                                     |
-| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`         | Secret ký JWT, **bắt buộc tối thiểu 16 ký tự**, không dùng giá trị mẫu ở production              |
-| `JWT_ACCESS_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN` | Thời hạn token (ví dụ `15m`, `30d`)                                                              |
-| `PUBLIC_BASE_URL`                                 | Base URL công khai, dùng để build link ảnh upload                                                |
-| `CORS_ORIGINS`                                    | Danh sách origin được phép, phân tách bằng dấu phẩy                                              |
-| `MEDIA_STORAGE_PROVIDER`                          | `local` (mặc định) hoặc `s3` (chưa triển khai ở Phase 1)                                         |
+| Biến                                              | Mô tả                                                                                                                                               |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                    | Connection string PostgreSQL                                                                                                                        |
+| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`         | Secret ký JWT, **bắt buộc tối thiểu 16 ký tự**, không dùng giá trị mẫu ở production                                                                 |
+| `JWT_ACCESS_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN` | Thời hạn token (ví dụ `15m`, `30d`)                                                                                                                 |
+| `PUBLIC_BASE_URL`                                 | Base URL công khai, dùng để build link ảnh upload                                                                                                   |
+| `CORS_ORIGINS`                                    | Danh sách origin được phép, phân tách bằng dấu phẩy                                                                                                 |
+| `MEDIA_STORAGE_PROVIDER`                          | `local` (mặc định) hoặc `s3` (chưa triển khai ở Phase 1)                                                                                            |
 | `ZALO_AUTH_MODE`                                  | `mock` (dev/test, chấp nhận token dạng `mock:<zaloId>:<tên>`) hoặc `real` (production, verify thật qua Zalo Graph API — bắt buộc `ZALO_APP_SECRET`) |
-| `ZALO_APP_SECRET`                                 | App Secret Key từ Zalo Developers — bắt buộc khi `ZALO_AUTH_MODE=real`, không cần cho mode mock  |
-| `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`         | Tài khoản admin được tạo khi chạy seed                                                           |
+| `ZALO_APP_SECRET`                                 | App Secret Key từ Zalo Developers — bắt buộc khi `ZALO_AUTH_MODE=real`, không cần cho mode mock                                                     |
+| `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`         | Tài khoản admin được tạo khi chạy seed                                                                                                              |
 
 Ứng dụng **fail-fast** nếu thiếu biến bắt buộc hoặc giá trị không hợp lệ (validate bằng Joi khi khởi động).
 
@@ -131,51 +131,64 @@ docker compose up -d --build
 
 | Role                    | Quyền                                                                                 |
 | ----------------------- | ------------------------------------------------------------------------------------- |
-| GUEST (không đăng nhập) | Xem nội dung công khai (tin giao thương đã publish, review đã duyệt)                  |
+| GUEST (không đăng nhập) | Xem nội dung công khai (tin giao thương đã publish, review đang hiển thị)             |
 | USER                    | Toàn bộ quyền GUEST + tạo/sửa/xóa đánh giá của mình, quản lý tin giao thương của mình |
 | BUSINESS                | Giống USER ở Phase 1 (chưa có đặc quyền riêng)                                        |
-| MODERATOR               | Duyệt/từ chối/lưu trữ tin giao thương, duyệt/ẩn đánh giá                              |
+| MODERATOR               | Duyệt/từ chối/lưu trữ tin giao thương, ẩn/hiện lại đánh giá                           |
 | ADMIN                   | Toàn quyền, bao gồm quản lý danh mục (`Category`)                                     |
 
 RBAC được enforce ở backend qua `RolesGuard` (không chỉ kiểm tra ở frontend). Các thao tác sửa/xóa tài nguyên còn được kiểm tra quyền sở hữu (`ownerId`/`userId` khớp với người gọi API) độc lập với role.
 
 ## 17. Danh sách endpoint (Phase 1)
 
-| Method                    | Endpoint                                    | Auth   | Role                     | Mô tả                                                       |
-| ------------------------- | ------------------------------------------- | ------ | ------------------------ | ----------------------------------------------------------- |
-| GET                       | `/health`                                   | Public | —                        | Health check, không đụng DB                                 |
-| GET                       | `/health/database`                          | Public | —                        | Health check có kiểm tra kết nối DB                         |
-| POST                      | `/auth/zalo`                                | Public | —                        | Đăng nhập bằng Zalo (mock ở dev)                            |
-| POST                      | `/auth/login`                               | Public | —                        | Đăng nhập email/mật khẩu                                    |
-| POST                      | `/auth/refresh`                             | Public | —                        | Làm mới access token                                        |
-| POST                      | `/auth/logout`                              | Public | —                        | Đăng xuất phiên hiện tại                                    |
-| POST                      | `/auth/logout-all`                          | Bearer | Any                      | Đăng xuất tất cả thiết bị                                   |
-| GET                       | `/auth/me`                                  | Bearer | Any                      | Thông tin user hiện tại                                     |
-| GET                       | `/users/me`                                 | Bearer | Any                      | Xem hồ sơ                                                   |
-| PATCH                     | `/users/me`                                 | Bearer | Any                      | Cập nhật hồ sơ                                              |
-| GET                       | `/sessions`                                 | Bearer | Any                      | Danh sách thiết bị đang đăng nhập                           |
-| DELETE                    | `/sessions/:id`                             | Bearer | Any                      | Thu hồi một thiết bị                                        |
-| POST                      | `/media/images`                             | Bearer | Any                      | Upload ảnh                                                  |
-| GET                       | `/categories`, `/categories/:type`          | Public | —                        | Danh mục đang hoạt động theo domain                         |
-| GET                       | `/admin/categories?domain=`                 | Bearer | MODERATOR, ADMIN         | Danh mục theo domain (kể cả đã vô hiệu hóa)                 |
-| POST/PATCH/DELETE         | `/admin/categories...`                      | Bearer | MODERATOR, ADMIN         | Quản lý danh mục                                            |
-| GET                       | `/trade-posts`                              | Public | —                        | Danh sách tin đã publish                                    |
-| GET                       | `/trade-posts/:idOrSlug`                    | Public | —                        | Chi tiết tin đã publish                                     |
-| GET                       | `/trade-posts/me`                           | Bearer | Any                      | Tin của tôi (mọi trạng thái)                                |
-| POST                      | `/trade-posts`                              | Bearer | Any                      | Tạo tin (DRAFT)                                             |
-| PATCH                     | `/trade-posts/:id`                          | Bearer | Chủ tin                  | Sửa tin                                                     |
-| DELETE                    | `/trade-posts/:id`                          | Bearer | Chủ tin                  | Xóa (thu hồi) tin                                           |
-| PATCH                     | `/trade-posts/:id/submit`                   | Bearer | Chủ tin                  | Gửi duyệt                                                   |
-| GET/PATCH                 | `/admin/trade-posts...`                     | Bearer | MODERATOR, ADMIN         | Duyệt/từ chối/lưu trữ/nổi bật                               |
-| GET                       | `/trade-posts/:tradePostId/reviews`         | Public | —                        | Đánh giá đã duyệt                                           |
-| GET                       | `/trade-posts/:tradePostId/reviews/summary` | Public | —                        | Thống kê đánh giá                                           |
-| POST                      | `/trade-posts/:tradePostId/reviews`         | Bearer | Any (không phải chủ tin) | Gửi đánh giá                                                |
-| PATCH/DELETE              | `/reviews/:id`                              | Bearer | Chủ đánh giá             | Sửa/xóa đánh giá                                            |
-| POST/DELETE               | `/reviews/:id/images...`                    | Bearer | Chủ đánh giá             | Quản lý ảnh đánh giá                                        |
-| GET                       | `/admin/reviews`                            | Bearer | MODERATOR, ADMIN         | Danh sách đánh giá (mọi trạng thái, lọc status/tradePostId) |
-| PATCH                     | `/admin/reviews/:id/status`                 | Bearer | MODERATOR, ADMIN         | Duyệt/ẩn đánh giá                                           |
-| GET                       | `/temples`, `/temples/:id`                  | Public | —                        | Danh sách/chi tiết Đền - Chùa - Miếu đang hiển thị          |
-| GET/POST/PUT/PATCH/DELETE | `/admin/temples...`                         | Bearer | MODERATOR, ADMIN         | CRUD, ẩn/hiện và sắp xếp điểm du lịch                       |
+| Method                    | Endpoint                                    | Auth          | Role                      | Mô tả                                                                               |
+| ------------------------- | ------------------------------------------- | ------------- | ------------------------- | ----------------------------------------------------------------------------------- |
+| GET                       | `/health`                                   | Public        | —                         | Health check, không đụng DB                                                         |
+| GET                       | `/health/database`                          | Public        | —                         | Health check có kiểm tra kết nối DB                                                 |
+| POST                      | `/auth/zalo`                                | Public        | —                         | Đăng nhập bằng Zalo (mock ở dev)                                                    |
+| POST                      | `/auth/login`                               | Public        | —                         | Đăng nhập email/mật khẩu                                                            |
+| POST                      | `/auth/refresh`                             | Public        | —                         | Làm mới access token                                                                |
+| POST                      | `/auth/logout`                              | Public        | —                         | Đăng xuất phiên hiện tại                                                            |
+| POST                      | `/auth/logout-all`                          | Bearer        | Any                       | Đăng xuất tất cả thiết bị                                                           |
+| GET                       | `/auth/me`                                  | Bearer        | Any                       | Thông tin user hiện tại                                                             |
+| GET                       | `/users/me`                                 | Bearer        | Any                       | Xem hồ sơ                                                                           |
+| PATCH                     | `/users/me`                                 | Bearer        | Any                       | Cập nhật hồ sơ                                                                      |
+| GET                       | `/sessions`                                 | Bearer        | Any                       | Danh sách thiết bị đang đăng nhập                                                   |
+| DELETE                    | `/sessions/:id`                             | Bearer        | Any                       | Thu hồi một thiết bị                                                                |
+| POST                      | `/media/images`                             | Bearer        | Any                       | Upload ảnh                                                                          |
+| GET                       | `/categories`, `/categories/:type`          | Public        | —                         | Danh mục đang hoạt động theo domain                                                 |
+| GET                       | `/search?q=&types=&page=&limit=`            | Public        | —                         | Tìm kiếm toàn cục nội dung đang công khai                                           |
+| GET                       | `/admin/search?q=&types=&page=&limit=`      | Bearer        | MODERATOR, ADMIN          | Tìm kiếm toàn cục gồm cả nội dung ẩn/nháp/lên lịch                                  |
+| GET                       | `/admin/categories?domain=`                 | Bearer        | MODERATOR, ADMIN          | Danh mục theo domain (kể cả đã vô hiệu hóa)                                         |
+| POST/PATCH/DELETE         | `/admin/categories...`                      | Bearer        | MODERATOR, ADMIN          | Quản lý danh mục                                                                    |
+| GET                       | `/trade-posts`                              | Public        | —                         | Danh sách tin đã publish                                                            |
+| GET                       | `/trade-posts/:idOrSlug`                    | Public        | —                         | Chi tiết tin đã publish (gửi kèm token để có `isSaved`)                             |
+| POST/DELETE               | `/trade-posts/:idOrSlug/save`               | Bearer        | Any                       | Lưu / bỏ lưu tin (idempotent) → `{ saved, saveCount }`                              |
+| GET                       | `/trade-posts/me/saved`                     | Bearer        | Any                       | Tin đã lưu (kèm `savedAt`, `isAvailable`)                                           |
+| GET                       | `/trade-posts/me`                           | Bearer        | BUSINESS (ACTIVE)         | Tin của tôi (mọi trạng thái, sortBy + sortOrder)                                    |
+| GET                       | `/trade-posts/:id/manage`                   | Bearer        | Chủ tin, MODERATOR, ADMIN | Chi tiết tin để quản lý (mọi trạng thái)                                            |
+| GET/PUT/DELETE            | `/trade-management/reviews...`              | Bearer        | BUSINESS (chủ tin)        | Đánh giá trên tin của tôi, phản hồi/xóa phản hồi                                    |
+| GET/POST/PATCH/DELETE     | `/content-reviews...`                       | Public/Bearer | Any                       | Bình luận đánh giá 8 mục nội dung — xem `docs/content-reviews-api.md`               |
+| GET/PATCH/PUT/DELETE      | `/admin/content-reviews...`                 | Bearer        | MODERATOR, ADMIN          | Kiểm duyệt, phản hồi bình luận đánh giá nội dung                                    |
+| GET/POST/PATCH            | `/trade-conversations...`                   | Bearer        | Any (khách ↔ chủ tin)     | Chat về tin giao thương — xem `docs/trade-seller-center-api.md`                     |
+| GET/PATCH                 | `/notifications...`                         | Bearer        | Any                       | Chuông thông báo + socket `/notifications` — xem `docs/notifications-api.md`        |
+| POST                      | `/trade-posts`                              | Bearer        | Any                       | Tạo tin (DRAFT)                                                                     |
+| PATCH                     | `/trade-posts/:id`                          | Bearer        | Chủ tin                   | Sửa tin                                                                             |
+| DELETE                    | `/trade-posts/:id`                          | Bearer        | Chủ tin                   | Xóa (thu hồi) tin                                                                   |
+| PATCH                     | `/trade-posts/:id/submit`                   | Bearer        | Chủ tin                   | Gửi duyệt                                                                           |
+| GET/PATCH                 | `/admin/trade-posts...`                     | Bearer        | MODERATOR, ADMIN          | Duyệt/từ chối/lưu trữ/nổi bật                                                       |
+| GET                       | `/trade-posts/:tradePostId/reviews`         | Public        | —                         | Đánh giá đang hiển thị (đăng là hiển thị ngay, không cần duyệt)                     |
+| GET                       | `/trade-posts/:tradePostId/reviews/summary` | Public        | —                         | Thống kê đánh giá                                                                   |
+| POST                      | `/trade-posts/:tradePostId/reviews`         | Bearer        | Any (không phải chủ tin)  | Gửi đánh giá                                                                        |
+| PATCH/DELETE              | `/reviews/:id`                              | Bearer        | Chủ đánh giá              | Sửa/xóa đánh giá                                                                    |
+| POST/DELETE               | `/reviews/:id/images...`                    | Bearer        | Chủ đánh giá              | Quản lý ảnh đánh giá                                                                |
+| GET                       | `/admin/reviews`                            | Bearer        | MODERATOR, ADMIN          | Danh sách đánh giá kèm tin + người đánh giá (lọc status/tradePostId/rating, search) |
+| GET                       | `/admin/reviews/stats`                      | Bearer        | MODERATOR, ADMIN          | Số đánh giá theo trạng thái (lọc tradePostId)                                       |
+| GET                       | `/admin/reviews/:id`                        | Bearer        | MODERATOR, ADMIN          | Chi tiết đánh giá                                                                   |
+| PATCH                     | `/admin/reviews/:id/status`                 | Bearer        | MODERATOR, ADMIN          | Ẩn/hiện lại đánh giá                                                                |
+| DELETE                    | `/admin/reviews/:id`                        | Bearer        | MODERATOR, ADMIN          | Xóa đánh giá (xóa mềm, tính lại điểm, ghi audit log)                                |
+| GET                       | `/temples`, `/temples/:id`                  | Public        | —                         | Danh sách/chi tiết Đền - Chùa - Miếu đang hiển thị                                  |
+| GET/POST/PUT/PATCH/DELETE | `/admin/temples...`                         | Bearer        | MODERATOR, ADMIN          | CRUD, ẩn/hiện và sắp xếp điểm du lịch                                               |
 
 Toàn bộ endpoint có prefix `/api/v1`.
 
@@ -183,16 +196,51 @@ Toàn bộ endpoint có prefix `/api/v1`.
 
 | Method | Endpoint                                   | Auth   | Role             | Mô tả                                                     |
 | ------ | ------------------------------------------ | ------ | ---------------- | --------------------------------------------------------- |
+| POST   | `/admin/users`                             | Bearer | ADMIN            | Tạo tài khoản USER, BUSINESS hoặc MODERATOR               |
 | GET    | `/admin/users`                             | Bearer | MODERATOR, ADMIN | Danh sách, tìm kiếm và lọc người dùng                     |
 | PATCH  | `/admin/users/:id/status`                  | Bearer | MODERATOR, ADMIN | Khóa/mở khóa người dùng; khóa sẽ thu hồi refresh sessions |
+| GET    | `/business-applications/business-types`    | Public | —                | Loại hình đăng ký và trường/giấy tờ cần cho từng loại     |
 | POST   | `/business-applications`                   | Bearer | Any              | Nộp hồ sơ đăng ký BUSINESS                                |
+| POST   | `/business-applications/request-documents` | Public | —                | Tải giấy tờ cho yêu cầu đăng ký công khai                 |
+| POST   | `/business-applications/requests`          | Public | —                | Gửi yêu cầu đăng ký khi chưa có tài khoản                 |
 | GET    | `/business-applications/me`                | Bearer | Any              | Hồ sơ BUSINESS mới nhất của tôi                           |
 | PATCH  | `/business-applications/:id`               | Bearer | Chủ hồ sơ        | Sửa và gửi lại hồ sơ đã bị từ chối                        |
 | GET    | `/admin/business-applications`             | Bearer | MODERATOR, ADMIN | Danh sách hồ sơ BUSINESS                                  |
-| POST   | `/admin/business-applications/:id/approve` | Bearer | MODERATOR, ADMIN | Duyệt và nâng tài khoản Zalo đã nộp hồ sơ thành BUSINESS  |
+| POST   | `/admin/business-applications/:id/approve` | Bearer | MODERATOR, ADMIN | Duyệt hồ sơ; tạo mới hoặc nâng tài khoản thành BUSINESS   |
 | POST   | `/admin/business-applications/:id/reject`  | Bearer | MODERATOR, ADMIN | Từ chối hồ sơ BUSINESS                                    |
+| GET    | `/business-profiles`                       | Public | —                | Danh sách hồ sơ doanh nghiệp công khai                    |
+| GET    | `/business-profiles/:idOrUserId`           | Public | —                | Chi tiết hồ sơ doanh nghiệp công khai                     |
+| POST   | `/business-profiles`                       | Bearer | BUSINESS         | Tạo/khôi phục hồ sơ vận hành của tài khoản hiện tại       |
+| GET    | `/business-profiles/me`                    | Bearer | BUSINESS         | Xem đầy đủ hồ sơ vận hành của tôi                         |
+| PATCH  | `/business-profiles/me`                    | Bearer | BUSINESS         | Cập nhật hồ sơ của tôi bằng optimistic locking            |
+| DELETE | `/business-profiles/me`                    | Bearer | BUSINESS         | Xóa mềm hồ sơ của tôi                                     |
+| CRUD   | `/admin/business-profiles...`              | Bearer | ADMIN            | CRUD hồ sơ; MODERATOR được xem danh sách/chi tiết         |
 
 Tài liệu hồ sơ được trả bằng URL ký HMAC có thời hạn 5 phút. Media đã gắn với hồ sơ BUSINESS bị chặn tại static public route.
+
+Khi duyệt hồ sơ, admin không cần gửi `initialPassword`; client cũ còn gửi field
+này vẫn được chấp nhận nhưng giá trị sẽ bị bỏ qua. Nếu tài khoản chưa có mật
+khẩu, backend tự sinh mật khẩu ngẫu nhiên 16 ký tự bằng CSPRNG, chỉ lưu Argon2
+hash và trả plaintext đúng một lần trong trường `initialPassword` của response
+duyệt (`Cache-Control: no-store, private`). Tài khoản đã có mật khẩu được giữ
+nguyên và trường này trả `null`. Backend đồng thời tạo/cập nhật
+`BusinessProfile` từ thông tin đã xác minh. Chi tiết CRUD và field theo loại
+hình xem
+[docs/business-profiles-api.md](docs/business-profiles-api.md).
+
+### Loại hình đăng ký và tin phi lợi nhuận
+
+- Hồ sơ có `businessType`: `TEMPLE_MANAGEMENT` (Ban quản lý đền/miếu),
+  `RESTAURANT`, `ACCOMMODATION`, `GARDEN`, `GENERAL` (mặc định, giữ quy tắc
+  cá nhân/doanh nghiệp cũ). Trường và giấy tờ bắt buộc của từng loại nằm ở
+  `src/modules/business-applications/business-type.config.ts` và được trả qua
+  `GET /business-applications/business-types`. Khi duyệt, loại hình được ghi vào
+  `User.businessType`.
+- Tin giao thương có `purpose`: `COMMERCIAL` (có lợi nhuận, bắt buộc `priceType`)
+  hoặc `NON_PROFIT` (không có giá, có thể có `eventStartAt`/`eventEndAt`). Tài
+  khoản `TEMPLE_MANAGEMENT` chỉ đăng được `NON_PROFIT` (403
+  `TRADE_POST_PURPOSE_NOT_ALLOWED`). Tin không có `expiresAt` sẽ rời danh sách
+  công khai khi qua `eventEndAt`. Lọc công khai: `GET /trade-posts?purpose=NON_PROFIT`.
 
 ### Ẩn và xóa tin giao thương đã duyệt
 
@@ -216,6 +264,10 @@ Chi tiết contract, media mapping, migration và error code: [docs/about-api.md
 
 Public API chỉ trả điểm active; admin API hỗ trợ phân trang, lọc/tìm kiếm, CRUD, optimistic locking, status và reorder transaction. Chi tiết: [docs/temples-api.md](docs/temples-api.md).
 
+### Bình luận đánh giá nội dung
+
+Người dùng mini app chấm sao + bình luận (kèm tối đa 3 ảnh) cho Đền - Chùa - Miếu, Đặc sản, Di tích lịch sử, Nông nghiệp, Làng nghề, Ẩm thực, Lễ hội, Tour trải nghiệm; admin ẩn/hiện, xóa và phản hồi công khai. Chi tiết: [docs/content-reviews-api.md](docs/content-reviews-api.md).
+
 ## 18. Cấu trúc response
 
 Xem mục 2 (Kiến trúc). Chi tiết mã lỗi (`error.code`) trong `src/common/constants/error-codes.constant.ts`.
@@ -226,7 +278,7 @@ Xem `docs/frontend-integration.md` mục 6. Tóm tắt: multipart `POST /media/i
 
 ## 20. Kết nối frontend
 
-Xem `docs/frontend-integration.md` (hướng dẫn từng bước) và `docs/frontend-backend-mapping.md` (mapping field chi tiết cho module giao thương).
+Xem `docs/frontend-integration.md` (hướng dẫn từng bước), `docs/frontend-backend-mapping.md` (mapping field chi tiết cho module giao thương), `docs/trade-post-section-integration.md` (đưa tin Nhà hàng/Ban quản lý đền/Chủ vườn vào đúng mục), `docs/business-profiles-api.md` (CRUD hồ sơ theo role), `docs/search-mini-app-integration.md` và `docs/search-admin-integration.md` (tích hợp tìm kiếm toàn cục).
 
 ## 21. Assumption
 
@@ -234,7 +286,7 @@ Toàn bộ giả định thiết kế và quyết định kỹ thuật (kèm lý
 
 ## 22. Các hạn chế còn lại (Phase 1)
 
-- 14 module nội dung địa phương, Feedback, Favorites, Search, Admin dashboard: **chưa xây dựng** (Phase 2+).
+- 14 module nội dung địa phương, Feedback, Favorites, Admin dashboard: **chưa xây dựng** (Phase 2+).
 - `ZALO_AUTH_MODE=real` (xác thực Zalo thật) và `MEDIA_STORAGE_PROVIDER=s3`: chưa triển khai, chỉ có `mock`/`local`.
 - Không có job tự động chuyển `TradePost.status` sang `EXPIRED` khi hết hạn — tin hết hạn vẫn ẩn khỏi danh sách công khai đúng qua điều kiện query, nhưng cột `status` trong DB không tự cập nhật.
 - Docker Compose chưa được chạy thử trong môi trường phát triển này (máy không có Docker).

@@ -1,4 +1,4 @@
-import { Controller, Get, Headers, Res } from '@nestjs/common';
+import { Controller, Get, Res } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
@@ -21,9 +21,8 @@ export class TradePostCategoriesController {
   })
   @ApiResponse({ status: 200, type: [TradePostCategoryResponseDto] })
   async list(
-    @Headers('if-none-match') ifNoneMatch: string | undefined,
     @Res({ passthrough: true }) response: Response,
-  ): Promise<TradePostCategoryResponseDto[] | void> {
+  ): Promise<TradePostCategoryResponseDto[]> {
     const categories = await this.service.listPublic();
     const data = categories.map((category) =>
       TradePostCategoryResponseDto.fromEntity(category),
@@ -34,12 +33,11 @@ export class TradePostCategoriesController {
           `${category.id}:${category.sortOrder}:${category.code}:${categories[index].updatedAt.getTime()}`,
       )
       .join('|')}"`;
+    // Express answers 304 itself when If-None-Match matches this ETag
+    // (req.fresh in res.send); ending the response here would make Nest's
+    // passthrough reply write a second time.
     response.setHeader('ETag', etag);
     response.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
-    if (ifNoneMatch === etag) {
-      response.status(304).end();
-      return;
-    }
     return data;
   }
 }

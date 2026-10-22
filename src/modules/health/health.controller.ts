@@ -1,5 +1,6 @@
 import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Public } from '../../common/decorators/public.decorator';
 import { PrismaService } from '../../database/prisma.service';
 
@@ -14,6 +15,7 @@ export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 
   @Public()
+  @SkipThrottle()
   @Get()
   check(): HealthStatus {
     return { status: 'ok', timestamp: new Date().toISOString() };

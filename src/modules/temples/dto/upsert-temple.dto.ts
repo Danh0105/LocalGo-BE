@@ -16,6 +16,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { TEMPLE_TYPES, type TempleTypeLabel } from '../temple.constants';
+import { IsGoogleMapsUrl } from '../../../common/validation/google-maps-url.validator';
 import { TempleEventInputDto } from './temple-event-input.dto';
 
 const trim = ({ value }: { value: unknown }): unknown =>
@@ -45,6 +46,17 @@ export class TempleContentDto {
   @MinLength(1)
   @MaxLength(255)
   address: string;
+
+  @ApiPropertyOptional({
+    maxLength: 2048,
+    example: 'https://maps.app.goo.gl/example',
+  })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(2048)
+  @IsGoogleMapsUrl()
+  googleMapsUrl?: string;
 
   @ApiProperty({ maxLength: 100 })
   @Transform(trim)

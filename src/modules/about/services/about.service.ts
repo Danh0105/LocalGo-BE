@@ -54,6 +54,26 @@ export class AboutService {
     return this.toAdminState(await this.getPageOrThrow());
   }
 
+  private async resolveDraftMediaUrls(
+    snapshot: AboutSnapshot,
+  ): Promise<AboutSnapshot> {
+    const media = await this.repository.findMedia(this.mediaIds(snapshot));
+    const urls = new Map(media.map((item) => [item.id, item.originalUrl]));
+    return {
+      ...snapshot,
+      hero: {
+        ...snapshot.hero,
+        imageUrl: snapshot.hero.mediaId
+          ? (urls.get(snapshot.hero.mediaId) ?? '')
+          : '',
+      },
+      highlights: snapshot.highlights.map((item) => ({
+        ...item,
+        imageUrl: item.mediaId ? (urls.get(item.mediaId) ?? '') : '',
+      })),
+    };
+  }
+
   async preview(): Promise<AboutResponseDto> {
     const page = await this.getPageOrThrow();
     const snapshot = this.readSnapshot(page.draftSnapshot);
@@ -396,10 +416,11 @@ export class AboutService {
     ];
   }
 
-  private toAdminState(page: AboutPage): AboutAdminStateDto {
+  private async toAdminState(page: AboutPage): Promise<AboutAdminStateDto> {
     const draft = this.readSnapshot(page.draftSnapshot);
+    const resolvedDraft = await this.resolveDraftMediaUrls(draft);
     return {
-      draft,
+      draft: resolvedDraft,
       version: page.version,
       publishedVersion: page.publishedVersion,
       publishedAt: page.publishedAt,

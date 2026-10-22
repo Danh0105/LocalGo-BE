@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { CuisineCategoryLabel } from '../cuisine.constants';
+import { MapLocationResponseDto } from '../../../common/dto/map-location-response.dto';
 
 export class CuisineSuggestedPlaceResponseDto {
   @ApiProperty()
@@ -13,6 +14,58 @@ export class CuisineSuggestedPlaceResponseDto {
 
   @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
   googleMapsUrl: string;
+
+  @ApiPropertyOptional({
+    type: MapLocationResponseDto,
+    nullable: true,
+    readOnly: true,
+  })
+  mapLocation: MapLocationResponseDto | null;
+}
+
+export class CuisineGalleryImageResponseDto {
+  @ApiProperty()
+  mediaId: string;
+
+  @ApiProperty()
+  imageUrl: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  thumbnailUrl: string | null;
+
+  @ApiProperty()
+  sortOrder: number;
+}
+
+export class CuisineMenuItemResponseDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty()
+  price: string;
+
+  @ApiProperty()
+  description: string;
+}
+
+export class CuisineReviewResponseDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty()
+  reviewerName: string;
+
+  @ApiProperty({ minimum: 1, maximum: 5 })
+  rating: number;
+
+  @ApiProperty()
+  feedback: string;
+
+  @ApiProperty()
+  adminResponse: string;
 }
 
 export class CuisineListItemResponseDto {
@@ -33,6 +86,16 @@ export class CuisineListItemResponseDto {
   @ApiProperty()
   bestTime: string;
 
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
+
+  @ApiPropertyOptional({
+    type: MapLocationResponseDto,
+    nullable: true,
+    readOnly: true,
+  })
+  mapLocation: MapLocationResponseDto | null;
+
   @ApiProperty({
     type: [String],
     deprecated: true,
@@ -40,8 +103,17 @@ export class CuisineListItemResponseDto {
   })
   suggestedPlaces: string[];
 
+  @ApiProperty({ type: [CuisineSuggestedPlaceResponseDto] })
+  suggestedPlaceDetails: CuisineSuggestedPlaceResponseDto[];
+
   @ApiProperty()
   summary: string;
+
+  @ApiProperty({ minimum: 0, maximum: 5, example: 4.8 })
+  averageRating: number;
+
+  @ApiProperty({ minimum: 0 })
+  reviewCount: number;
 
   @ApiPropertyOptional({ nullable: true })
   imageUrl: string | null;
@@ -66,13 +138,25 @@ export class CuisineResponseDto extends CuisineListItemResponseDto {
   @ApiProperty()
   tip: string;
 
-  @ApiProperty({ type: [CuisineSuggestedPlaceResponseDto] })
-  suggestedPlaceDetails: CuisineSuggestedPlaceResponseDto[];
+  @ApiProperty()
+  contactPhone: string;
+
+  @ApiProperty({ type: [CuisineMenuItemResponseDto] })
+  menu: CuisineMenuItemResponseDto[];
+
+  @ApiProperty({ type: [CuisineReviewResponseDto] })
+  reviews: CuisineReviewResponseDto[];
+
+  @ApiProperty({ type: [CuisineGalleryImageResponseDto] })
+  galleryImages: CuisineGalleryImageResponseDto[];
 }
 
 export class CuisineAdminResponseDto extends CuisineResponseDto {
   @ApiPropertyOptional({ nullable: true })
   mediaId: string | null;
+
+  @ApiProperty({ type: [String] })
+  galleryMediaIds: string[];
 
   @ApiProperty()
   isActive: boolean;

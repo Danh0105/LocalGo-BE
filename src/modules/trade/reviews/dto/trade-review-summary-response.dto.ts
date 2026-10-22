@@ -4,7 +4,7 @@ export class TradeReviewSummaryResponseDto {
   @ApiProperty({ description: 'Điểm trung bình (0 nếu chưa có đánh giá)' })
   average: number;
 
-  @ApiProperty({ description: 'Tổng số đánh giá đã duyệt' })
+  @ApiProperty({ description: 'Tổng số đánh giá đang hiển thị' })
   total: number;
 
   @ApiProperty({

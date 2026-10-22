@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -10,8 +20,12 @@ import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.interface';
 import { QueryFeedbackTicketAdminDto } from '../dto/query-feedback-ticket.dto';
+import { ReplyFeedbackTicketDto } from '../dto/reply-feedback-ticket.dto';
 import { UpdateFeedbackTicketStatusDto } from '../dto/update-feedback-ticket-status.dto';
-import { FeedbackTicketAdminResponseDto } from '../dto/feedback-ticket-response.dto';
+import {
+  FeedbackMessageResponseDto,
+  FeedbackTicketAdminResponseDto,
+} from '../dto/feedback-ticket-response.dto';
 import { FeedbackTicketService } from '../services/feedback-ticket.service';
 
 @ApiTags('admin-feedback-tickets')
@@ -33,6 +47,33 @@ export class FeedbackTicketsAdminController {
   @ApiResponse({ status: 200, type: FeedbackTicketAdminResponseDto })
   detail(@Param('id') id: string): Promise<FeedbackTicketAdminResponseDto> {
     return this.service.adminDetail(id);
+  }
+
+  @Post(':id/realtime/access')
+  realtimeAccess(@Param('id') id: string) {
+    return this.service.socketTokenAdmin(id);
+  }
+
+  @Post(':id/realtime/read')
+  markRead(@Param('id') id: string) {
+    return this.service.markReadAdmin(id);
+  }
+
+  @Get(':id/realtime/unread')
+  unread(@Param('id') id: string) {
+    return this.service.unreadAdmin(id);
+  }
+
+  @Post(':id/messages')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: '[Admin] Trả lời người gửi bằng tin nhắn/ảnh' })
+  @ApiResponse({ status: 201, type: FeedbackMessageResponseDto })
+  reply(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ReplyFeedbackTicketDto,
+  ): Promise<FeedbackMessageResponseDto> {
+    return this.service.replyAsAdmin(actor.id, id, dto);
   }
 
   @Patch(':id/status')

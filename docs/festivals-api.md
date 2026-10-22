@@ -35,6 +35,7 @@ Public list chỉ trả dữ liệu cần cho thẻ danh sách. Public detail tr
   "activities": ["Dâng hương, cầu an đầu năm"],
   "note": "Cập nhật lịch tổ chức, đơn vị phụ trách và sơ đồ khu vực lễ hội.",
   "mediaId": "uuid-media",
+  "galleryMediaIds": ["uuid-media-2", "uuid-media-3"],
   "imageAlt": "Lễ hội đình làng Truông Mít",
   "isActive": true
 }
@@ -49,6 +50,8 @@ Khi `version` cũ, API trả `409 FESTIVAL_VERSION_CONFLICT`; `error.details[0].
 1. Upload JPEG/PNG/WebP bằng `POST /api/v1/media/images` với Bearer token.
 2. Dùng `data.id` làm `mediaId` khi tạo/cập nhật lễ hội.
 3. Backend xác minh media chưa xóa, MIME bắt đầu bằng `image/`, thuộc người gọi và chưa được nội dung khác sử dụng. Media được claim thành resource `FESTIVAL` trong cùng transaction ghi nội dung.
+
+Có thể upload tối đa 10 ảnh/lần qua `POST /api/v1/media/images/batch` (multipart field `files`). `mediaId` là ảnh đại diện; `galleryMediaIds` chứa tối đa 10 ảnh thư viện theo thứ tự hiển thị và không được lặp ảnh đại diện. Public/admin detail trả `galleryImages`; admin response trả thêm `galleryMediaIds`.
 
 Seed không hard-code domain CDN hay đường dẫn máy local. Có thể upload một ảnh placeholder vào media storage của môi trường, sau đó đặt `FESTIVAL_PLACEHOLDER_MEDIA_ID` trước khi chạy seed. Nếu không đặt, seed vẫn tạo đủ nội dung với `mediaId = null`; admin có thể gắn ảnh sau.
 

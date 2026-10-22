@@ -7,15 +7,21 @@ import {
   IsDateString,
   IsEmail,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
   IsUrl,
   Matches,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { BusinessApplicantType } from '../../../../generated/prisma';
+import {
+  BusinessApplicantType,
+  BusinessType,
+} from '../../../../generated/prisma';
 import { BusinessApplicationDocumentInputDto } from './business-application-document-input.dto';
 
 export class UpsertBusinessApplicationDto {
@@ -23,12 +29,80 @@ export class UpsertBusinessApplicationDto {
   @IsEnum(BusinessApplicantType)
   applicantType: BusinessApplicantType;
 
-  @ApiProperty() @IsString() @MinLength(2) @MaxLength(200) businessName: string;
-  @ApiProperty()
+  @ApiPropertyOptional({
+    enum: BusinessType,
+    default: BusinessType.GENERAL,
+    description:
+      'Loại hình đăng ký. Trường/giấy tờ bắt buộc theo từng loại hình: GET /business-applications/business-types',
+  })
+  @IsOptional()
+  @IsEnum(BusinessType)
+  businessType?: BusinessType;
+
+  @ApiProperty({
+    description:
+      'Tên cơ sở / Ban quản lý (vd. "Nhà hàng Bến Sông", "Ban quản lý Đền Bà")',
+  })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(200)
+  businessName: string;
+
+  @ApiPropertyOptional({
+    description: 'Lĩnh vực cụ thể. Bỏ trống thì dùng tên loại hình.',
+  })
+  @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(120)
-  businessCategory: string;
+  businessCategory?: string;
+
+  @ApiPropertyOptional({ nullable: true, description: 'TEMPLE_MANAGEMENT' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  templeName?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'RESTAURANT / ACCOMMODATION, vd. "6:00 – 22:00"',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  openingHours?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'RESTAURANT' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(100000)
+  seatingCapacity?: number | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'ACCOMMODATION' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10000)
+  roomCount?: number | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'GARDEN, vd. "2 ha"',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  gardenArea?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'GARDEN (bắt buộc), vd. "Sầu riêng, bưởi da xanh"',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  mainProducts?: string | null;
   @ApiProperty() @IsString() @MinLength(2) @MaxLength(120) contactName: string;
 
   @ApiProperty({ example: '0901234567' })

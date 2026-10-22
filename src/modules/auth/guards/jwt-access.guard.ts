@@ -1,7 +1,7 @@
 import { ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
-import type { Observable } from 'rxjs';
+import type { Request } from 'express';
 import { IS_PUBLIC_KEY } from '../../../common/decorators/public.decorator';
 
 @Injectable()
@@ -10,16 +10,26 @@ export class JwtAccessGuard extends AuthGuard('jwt') {
     super();
   }
 
-  override canActivate(
-    context: ExecutionContext,
-  ): boolean | Promise<boolean> | Observable<boolean> {
+  override async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) {
-      return true;
+    if (!isPublic) {
+      return (await super.canActivate(context)) as boolean;
     }
-    return super.canActivate(context);
+
+    // Public routes stay open, but a valid Bearer token still identifies the
+    // viewer (e.g. "isSaved" on posts, attributing views). A missing, invalid
+    // or blocked token just means an anonymous request — never a 401.
+    const request = context.switchToHttp().getRequest<Request>();
+    if (request.headers.authorization) {
+      try {
+        await super.canActivate(context);
+      } catch {
+        request.user = undefined;
+      }
+    }
+    return true;
   }
 }

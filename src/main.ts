@@ -12,19 +12,49 @@ import { AppModule } from './app.module';
 import type { AppConfig } from './config/app.config';
 import type { MediaConfig } from './config/media.config';
 import { RequestContextService } from './common/context/request-context.service';
+import { CorsIoAdapter } from './common/adapters/cors-io.adapter';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { createValidationException } from './common/validation/validation-exception.factory';
 import { PrismaService } from './database/prisma.service';
+import { OverloadProtection } from './common/overload/overload-protection';
+import { OverloadInterceptor } from './common/overload/overload.interceptor';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
+    bodyParser: false,
   });
+
+  // nginx proxies from 127.0.0.1. Without this req.ip is the proxy address,
+  // so ThrottlerGuard puts every client in one bucket and a handful of users
+  // exhaust the per-route limits for everyone. 'loopback' only honours
+  // X-Forwarded-For from the local proxy, so direct hits to :3015 can't spoof it.
+  app.set('trust proxy', 'loopback');
 
   const configService = app.get(ConfigService);
   const appConfig = configService.getOrThrow<AppConfig>('app');
   const mediaConfig = configService.getOrThrow<MediaConfig>('media');
+
+  app.use(helmet());
+  app.enableCors({
+    origin: appConfig.corsOrigins.length > 0 ? appConfig.corsOrigins : false,
+    credentials: true,
+    exposedHeaders: ['Retry-After', 'X-Request-Id'],
+  });
+  const overloadProtection = app.get(OverloadProtection);
+  app.use(overloadProtection.middleware);
+
+  // Public media is intentionally embedded by the Mini App and admin site,
+  // which run on origins different from the API host. Helmet defaults CORP to
+  // same-origin, so override it only for files served below /uploads/.
+  app.use(
+    '/uploads',
+    (_request: Request, response: Response, next: NextFunction) => {
+      response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      next();
+    },
+  );
 
   // Business identity/legal documents are never served by the public static
   // route. Their short-lived URLs are resolved by the guarded document
@@ -61,11 +91,8 @@ async function bootstrap(): Promise<void> {
 
   app.setGlobalPrefix('api/v1');
 
-  app.use(helmet());
-  app.enableCors({
-    origin: appConfig.corsOrigins.length > 0 ? appConfig.corsOrigins : false,
-    credentials: true,
-  });
+  // Socket.IO (notifications namespace) shares the same origin allow-list.
+  app.useWebSocketAdapter(new CorsIoAdapter(app, appConfig.corsOrigins));
 
   app.useBodyParser('json', { limit: appConfig.bodyLimit });
   app.useBodyParser('urlencoded', {
@@ -87,7 +114,10 @@ async function bootstrap(): Promise<void> {
 
   const requestContext = app.get(RequestContextService);
   app.useGlobalFilters(new HttpExceptionFilter(requestContext));
-  app.useGlobalInterceptors(new ResponseInterceptor());
+  app.useGlobalInterceptors(
+    new OverloadInterceptor(overloadProtection),
+    new ResponseInterceptor(),
+  );
 
   if (appConfig.swaggerEnabled) {
     const document = SwaggerModule.createDocument(
@@ -105,6 +135,13 @@ async function bootstrap(): Promise<void> {
   }
 
   app.enableShutdownHooks();
+
+  const server = app.getHttpServer();
+  server.requestTimeout = appConfig.httpRequestTimeoutMs;
+  server.headersTimeout = Math.min(10_000, appConfig.httpRequestTimeoutMs);
+  server.keepAliveTimeout = 5_000;
+  // Inactivity timeout closes stalled sockets; it is not Promise cancellation.
+  server.setTimeout(appConfig.httpIdleTimeoutMs);
 
   await app.listen(appConfig.port);
   Logger.log(

@@ -9,9 +9,15 @@ import {
 } from '../../../../common/pagination/pagination.util';
 import { PrismaService } from '../../../../database/prisma.service';
 import type { PaginationQueryDto } from '../../../../common/dto/pagination-query.dto';
+import {
+  NotificationType,
+  excerpt,
+} from '../../../notifications/notification-types';
+import { NotificationService } from '../../../notifications/services/notification.service';
 import { TradePostEntity } from '../../posts/entities/trade-post.entity';
 import { TradePostEventRepository } from '../../posts/repositories/trade-post-event.repository';
 import { TradePostRepository } from '../../posts/repositories/trade-post.repository';
+import { isPubliclyVisible } from '../../posts/utils/trade-post-business-rules.util';
 import { TradePostFavoriteRepository } from '../repositories/trade-post-favorite.repository';
 
 @Injectable()
@@ -21,6 +27,7 @@ export class TradePostFavoriteService {
     private readonly favoriteRepository: TradePostFavoriteRepository,
     private readonly tradePostRepository: TradePostRepository,
     private readonly eventRepository: TradePostEventRepository,
+    private readonly notifications: NotificationService,
   ) {}
 
   /**
@@ -42,6 +49,7 @@ export class TradePostFavoriteService {
       );
     }
 
+    let newlySaved = false;
     const saveCount = await this.prisma.$transaction(async (tx) => {
       const existing = await this.favoriteRepository.findSaved(
         userId,
@@ -49,6 +57,7 @@ export class TradePostFavoriteService {
         tx,
       );
       if (!existing) {
+        newlySaved = true;
         await this.favoriteRepository.create(userId, post.id, tx);
         await this.eventRepository.record(
           { tradePostId: post.id, type: TradePostEventType.SAVE, userId },
@@ -59,7 +68,39 @@ export class TradePostFavoriteService {
       return tx.savedTradePost.count({ where: { tradePostId: post.id } });
     });
 
+    if (newlySaved) {
+      await this.notifyOwnerOfSave(userId, post.id);
+    }
     return { saved: true, saveCount };
+  }
+
+  private async notifyOwnerOfSave(
+    saverId: string,
+    tradePostId: string,
+  ): Promise<void> {
+    const [post, saver] = await Promise.all([
+      this.prisma.tradePost.findUnique({
+        where: { id: tradePostId },
+        select: { ownerId: true, title: true, slug: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: saverId },
+        select: { displayName: true },
+      }),
+    ]);
+    if (!post || post.ownerId === saverId) return;
+    // Only the first time this user ever saves the post: save/unsave/save
+    // toggling must not spam the owner. Each new save records a SAVE event.
+    const saves = await this.prisma.tradePostEvent.count({
+      where: { tradePostId, userId: saverId, type: TradePostEventType.SAVE },
+    });
+    if (saves > 1) return;
+    await this.notifications.notify(post.ownerId, {
+      type: NotificationType.TRADE_POST_SAVED,
+      title: 'Có người lưu tin của bạn',
+      body: `${saver?.displayName ?? 'Một người dùng'} đã lưu tin "${excerpt(post.title, 80)}".`,
+      data: { tradePostId, slug: post.slug },
+    });
   }
 
   /** Removes the user's save. Idempotent — returns silently if not saved. */
@@ -80,21 +121,46 @@ export class TradePostFavoriteService {
     });
   }
 
+  /**
+   * The user's saved posts, newest save first. Includes posts that are no
+   * longer public (hidden, expired, archived, back in moderation) flagged
+   * `isAvailable: false`, so the app can grey them out; deleted posts are dropped.
+   */
   async listSaved(
     userId: string,
     query: PaginationQueryDto,
-  ): Promise<PaginatedResultDto<TradePostEntity>> {
+  ): Promise<
+    PaginatedResultDto<{
+      post: TradePostEntity;
+      savedAt: Date;
+      isAvailable: boolean;
+    }>
+  > {
     const { skip, take } = buildPaginationArgs(query.page, query.limit);
     const { items, total } = await this.favoriteRepository.listByUser({
       userId,
       skip,
       take,
     });
+    const now = Date.now();
     return paginate(
-      items.map((item) => new TradePostEntity(item.tradePost)),
+      items.map((item) => ({
+        post: new TradePostEntity(item.tradePost),
+        savedAt: item.createdAt,
+        isAvailable: isPubliclyVisible(item.tradePost, now),
+      })),
       query.page,
       query.limit,
       total,
     );
+  }
+
+  /** Ids among `tradePostIds` saved by the viewer; empty for anonymous viewers. */
+  async savedPostIds(
+    userId: string | undefined,
+    tradePostIds: string[],
+  ): Promise<Set<string>> {
+    if (!userId) return new Set();
+    return this.favoriteRepository.findSavedPostIds(userId, tradePostIds);
   }
 }

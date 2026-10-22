@@ -19,6 +19,8 @@ import { AuthTokensResponseDto } from '../dto/auth-tokens-response.dto';
 import { PasswordLoginDto } from '../dto/password-login.dto';
 import { RefreshTokenDto } from '../dto/refresh-token.dto';
 import { ZaloLoginDto } from '../dto/zalo-login.dto';
+import { ForgotPasswordDto } from '../dto/forgot-password.dto';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { AuthService, type RequestMeta } from '../services/auth.service';
 
 @ApiTags('auth')
@@ -30,7 +32,10 @@ export class AuthController {
   ) {}
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  // Per client IP. Mini app users often share one public IP (office wifi,
+  // carrier CGNAT), and the Zalo token is verified upstream, so this is a
+  // flood guard rather than a brute-force guard like /auth/login.
+  @Throttle({ default: { limit: 50, ttl: 60_000 } })
   @ApiOperation({ summary: 'Đăng nhập bằng Zalo Mini App access token' })
   @Post('zalo')
   loginWithZalo(
@@ -43,7 +48,8 @@ export class AuthController {
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({
-    summary: 'Đăng nhập bằng email/mật khẩu (dành cho admin/moderator)',
+    summary:
+      'Đăng nhập bằng email/mật khẩu (admin, moderator hoặc tài khoản BUSINESS được cấp)',
   })
   @Post('login')
   loginWithPassword(
@@ -54,7 +60,35 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: 3, ttl: 15 * 60_000 } })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Yêu cầu liên kết đặt lại mật khẩu qua email',
+    description:
+      'Luôn trả cùng một thông báo để không tiết lộ email có tồn tại hay không.',
+  })
+  @Post('forgot-password')
+  async forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+  ): Promise<{ message: string }> {
+    await this.authService.requestPasswordReset(dto.email);
+    return {
+      message:
+        'Nếu email tồn tại và đủ điều kiện, hướng dẫn đặt lại mật khẩu đã được gửi.',
+    };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 15 * 60_000 } })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Đặt lại mật khẩu bằng token dùng một lần' })
+  @Post('reset-password')
+  resetPassword(@Body() dto: ResetPasswordDto): Promise<void> {
+    return this.authService.resetPassword(dto);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 50, ttl: 60_000 } })
   @ApiOperation({ summary: 'Làm mới access token bằng refresh token' })
   @Post('refresh')
   refresh(

@@ -4,21 +4,32 @@ Module `cuisine` quản lý danh sách món ăn địa phương. Mọi endpoint 
 
 ## Endpoints
 
-| Method | Endpoint                                             | Quyền            | Mô tả                                                       |
-| ------ | ------------------------------------------------------ | ---------------- | ------------------------------------------------------------ |
-| GET    | `/cuisine?category=Món nước`                            | Public           | Chỉ bản ghi active, sắp xếp `sortOrder`, `createdAt`, `id`   |
-| GET    | `/cuisine/:id`                                           | Public           | Chi tiết active, gồm `description`, `highlights`, `suggestedPlaces`, `tip` |
-| GET    | `/admin/cuisine?page=1&limit=20&category=&search=`      | ADMIN, MODERATOR | Danh sách gồm cả bản ghi ẩn, tìm theo tên                    |
-| GET    | `/admin/cuisine/:id`                                     | ADMIN, MODERATOR | Chi tiết và `version` hiện tại                                |
-| POST   | `/admin/cuisine`                                         | ADMIN, MODERATOR | Tạo mới, tự sinh slug nếu không gửi `id`                      |
-| PUT    | `/admin/cuisine/:id`                                     | ADMIN, MODERATOR | Cập nhật toàn bộ với optimistic locking                       |
-| PATCH  | `/admin/cuisine/:id/status`                              | ADMIN, MODERATOR | Ẩn/hiện với optimistic locking                                |
-| PATCH  | `/admin/cuisine/reorder`                                 | ADMIN, MODERATOR | Cập nhật thứ tự hàng loạt trong transaction                   |
-| DELETE | `/admin/cuisine/:id`                                     | ADMIN, MODERATOR | Xóa món ăn                                                     |
+| Method | Endpoint                                           | Quyền            | Mô tả                                                                      |
+| ------ | -------------------------------------------------- | ---------------- | -------------------------------------------------------------------------- |
+| GET    | `/cuisine?category=Món nước`                       | Public           | Chỉ bản ghi active, sắp xếp `sortOrder`, `createdAt`, `id`                 |
+| GET    | `/cuisine/:id`                                     | Public           | Chi tiết active, gồm `description`, `highlights`, `suggestedPlaces`, `tip` |
+| GET    | `/admin/cuisine?page=1&limit=20&category=&search=` | ADMIN, MODERATOR | Danh sách gồm cả bản ghi ẩn, tìm theo tên                                  |
+| GET    | `/admin/cuisine/:id`                               | ADMIN, MODERATOR | Chi tiết và `version` hiện tại                                             |
+| POST   | `/admin/cuisine`                                   | ADMIN, MODERATOR | Tạo mới, tự sinh slug nếu không gửi `id`                                   |
+| PUT    | `/admin/cuisine/:id`                               | ADMIN, MODERATOR | Cập nhật toàn bộ với optimistic locking                                    |
+| PATCH  | `/admin/cuisine/:id/status`                        | ADMIN, MODERATOR | Ẩn/hiện với optimistic locking                                             |
+| PATCH  | `/admin/cuisine/reorder`                           | ADMIN, MODERATOR | Cập nhật thứ tự hàng loạt trong transaction                                |
+| DELETE | `/admin/cuisine/:id`                               | ADMIN, MODERATOR | Xóa món ăn                                                                 |
 
-Public list chỉ trả dữ liệu cần cho thẻ danh sách (gồm cả `suggestedPlaces` — deprecated, xem mục Rollout bên dưới — vì danh sách địa điểm ngắn, phù hợp hiển thị ngay). Public detail trả thêm `description`, `highlights`, `tip` và `suggestedPlaceDetails`. Public API không phân biệt bản ghi không tồn tại và bản ghi đang ẩn: cả hai đều trả `404 CUISINE_ITEM_NOT_FOUND`.
+Public list trả dữ liệu thẻ, `averageRating`, `reviewCount`, `suggestedPlaces`
+(deprecated) và `suggestedPlaceDetails` để màn bản đồ có thể đọc các quán cùng
+`mapLocation`. Public detail trả thêm `description`, `highlights`, `tip`,
+`contactPhone`, `menu`, `reviews` và `galleryImages`. Public API không phân biệt
+bản ghi không tồn tại và bản ghi đang ẩn: cả hai đều trả
+`404 CUISINE_ITEM_NOT_FOUND`.
 
-`GET /cuisine/:id` trả `ETag: "cuisine-{id}-{updatedAtMillis}"` và `Cache-Control: public, max-age=60, must-revalidate`. Mọi thao tác cập nhật làm đổi `updatedAt`, vì vậy ETag cũ tự mất hiệu lực.
+Tin giao thương của tài khoản **Nhà hàng – quán ăn** được lấy riêng bằng
+`GET /api/v1/trade-posts?section=cuisine`. Xem
+`docs/trade-post-section-integration.md`.
+
+`GET /cuisine/:id` trả ETag gồm `id`, `updatedAt` và hash trạng thái định vị cấp
+món/các quán, cùng `Cache-Control: public, max-age=60, must-revalidate`. ETag
+đổi khi nội dung hoặc kết quả worker đổi.
 
 ## Request tạo/cập nhật
 
@@ -41,7 +52,26 @@ Public list chỉ trả dữ liệu cần cho thẻ danh sách (gồm cả `sugg
   "description": ["Đoạn 1", "Đoạn 2"],
   "highlights": ["Phù hợp ăn sáng, ăn nhẹ hoặc dùng sau khi tham quan"],
   "tip": "Nên ăn lúc còn nóng.",
+  "contactPhone": "0900 123 456",
+  "menu": [
+    {
+      "id": "to-dac-biet",
+      "name": "Tô đặc biệt",
+      "price": "55.000đ",
+      "description": "Đầy đủ topping"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "review-1",
+      "reviewerName": "Khách A",
+      "rating": 5,
+      "feedback": "Món ngon, phục vụ nhanh.",
+      "adminResponse": "Cảm ơn quý khách."
+    }
+  ],
   "mediaId": "uuid-media",
+  "galleryMediaIds": ["uuid-anh-phu-1", "uuid-anh-phu-2"],
   "imageAlt": "Bánh canh Trảng Bàng",
   "isActive": true
 }
@@ -62,8 +92,9 @@ Mỗi phần tử tối đa 20 phần tử/món, giữ đúng thứ tự Admin n
   `https://goo.gl/maps/...` (link rút gọn cũ). URL được so khớp `hostname` chính xác qua allowlist
   (không dùng `includes`), nên từ chối domain giả (`google.com.evil.example`), sai scheme (`http`,
   `javascript:`, `data:`), URL chứa `user:pass@`, URL không parse được hoặc vượt 2.048 ký tự.
-  Backend **không** gọi Geocoding, không follow link rút gọn, không tự sinh link từ tên — chỉ lưu và
-  trả lại đúng chuỗi Admin đã dán.
+  Backend lưu nguyên link và enqueue tác vụ định vị sau khi transaction commit. Worker có thể follow
+  link rút gọn an toàn; link chỉ có tên hoặc kết quả tìm kiếm mơ hồ được đánh dấu `unresolved`, không
+  tự chọn kết quả đầu tiên.
 - Khi món được bật hiển thị (`isActive = true`, lúc tạo mới, `PUT` hoặc `PATCH .../status`), **mỗi**
   địa điểm trong `suggestedPlaceDetails` phải có `address` và `googleMapsUrl` hợp lệ (không rỗng);
   thiếu một trong hai bị từ chối `400 VALIDATION_ERROR`.
@@ -78,11 +109,21 @@ từ `suggestedPlaceDetails[].name`, không phải nguồn dữ liệu độc l�
 
 Khi `version` cũ, API trả `409 CUISINE_ITEM_VERSION_CONFLICT`; `error.details[0].latest` chứa bản ghi mới nhất để giao diện cảnh báo và cho phép tải lại mà không ghi đè âm thầm.
 
+### Số điện thoại, menu và đánh giá/phản hồi
+
+- `contactPhone`: tùy chọn, tối đa 30 ký tự; chỉ chữ số, khoảng trắng và tối đa một dấu `+` ở đầu.
+- `menu`: tối đa 50 phần tử, giữ thứ tự Admin nhập. Mỗi phần tử gồm `id` duy nhất trong menu, `name`, `price` và `description` tùy chọn.
+- `reviews`: tối đa 100 phần tử, là nội dung do Admin quản lý; không phải đánh giá do tài khoản người dùng gửi trực tiếp. Mỗi phần tử gồm `id` duy nhất, `reviewerName`, `rating` nguyên từ 1–5, `feedback` và `adminResponse` tùy chọn.
+- `averageRating` và `reviewCount` là số liệu backend tự tính từ `reviews`; Admin không gửi hai trường này.
+- Trường tùy chọn dạng chuỗi được trả về thành chuỗi rỗng khi chưa cấu hình để frontend không phải xử lý nhiều kiểu dữ liệu.
+
 ## Media
 
 1. Upload JPEG/PNG/WebP bằng `POST /api/v1/media/images` với Bearer token.
-2. Dùng `data.id` làm `mediaId` khi tạo/cập nhật món ăn.
-3. Backend xác minh media chưa xóa, MIME bắt đầu bằng `image/`, thuộc người gọi và chưa được nội dung khác sử dụng. Media được claim thành resource `CUISINE` trong cùng transaction ghi nội dung.
+2. Dùng một `data.id` làm `mediaId` (ảnh chính) và tối đa 10 ID khác trong `galleryMediaIds` (ảnh phụ). Thứ tự mảng là thứ tự hiển thị; ảnh chính không được lặp lại trong ảnh phụ.
+3. Backend xác minh toàn bộ media chưa xóa, MIME bắt đầu bằng `image/`, thuộc người gọi và chưa được nội dung khác sử dụng. Media và các dòng `CuisineItemImage` được ghi trong cùng transaction với món ăn.
+4. Public detail trả `galleryImages[]` gồm `mediaId`, `imageUrl`, `thumbnailUrl`, `sortOrder`; Admin detail trả thêm `galleryMediaIds` để điền lại form.
+5. Khi thay/xóa ảnh, media không còn dùng được soft-delete và file storage được dọn theo cơ chế chung của dự án.
 
 Seed không hard-code domain CDN hay đường dẫn máy local. Có thể upload một ảnh placeholder vào media storage của môi trường, sau đó đặt `CUISINE_PLACEHOLDER_MEDIA_ID` trước khi chạy seed. Nếu không đặt, seed vẫn tạo đủ nội dung với `mediaId = null`; admin có thể gắn ảnh sau.
 
@@ -94,6 +135,8 @@ npm.cmd run db:seed
 ```
 
 Seed idempotent tạo đúng 5 slug hiện tại: `banh-canh-trang-bang`, `bo-to-nuong-rau-rung`, `goi-cuon-banh-trang-phoi-suong`, `banh-trang-tron`, `nem-buoi-chay`, giữ nguyên `description`, `highlights`, `suggestedPlaceDetails` (hiện chưa có `googleMapsUrl` thật, xem mục Rollout) và `tip` từ Mini App.
+
+Migration `20261020090000_expand_cuisine_management` thêm `contactPhone`, `menu`, `reviews` và bảng ảnh phụ `CuisineItemImage`. Bản ghi cũ nhận giá trị mặc định rỗng nên migration không làm mất dữ liệu.
 
 Slug `nem-buoi-chay` cố ý khác với `nem-buoi` bên module Đặc sản dù mô tả món tương tự — hai bảng `CuisineItem` và `Specialty` độc lập, không chia sẻ khóa chính hay khóa ngoại.
 
@@ -129,4 +172,5 @@ thiếu link Maps hợp lệ.
 - `INVALID_CUISINE_ITEM_MEDIA`: media thiếu, sai MIME, đã xóa hoặc không có quyền dùng.
 - `VALIDATION_ERROR`: enum, giới hạn chuỗi/mảng, slug, `googleMapsUrl` sai scheme/domain/quá dài, ID
   địa điểm trùng trong `suggestedPlaceDetails`, quá 20 địa điểm, cố kích hoạt món có địa điểm thiếu
-  `address`/`googleMapsUrl`, hoặc cấu trúc request không hợp lệ.
+  `address`/`googleMapsUrl`, ảnh chính trùng ảnh phụ, ID menu/review trùng, rating ngoài 1–5, số điện
+  thoại sai định dạng hoặc cấu trúc request không hợp lệ.

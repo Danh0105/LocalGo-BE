@@ -12,9 +12,9 @@ export const ABOUT_INITIAL_SNAPSHOT = {
     ],
   },
   statistics: [
-    { id: '00000000-0000-4000-8000-000000000101', value: '4.870', unit: 'ha', label: 'Diện tích tự nhiên', sortOrder: 0, isActive: true },
-    { id: '00000000-0000-4000-8000-000000000102', value: '21.500', unit: 'người', label: 'Dân số', sortOrder: 1, isActive: true },
-    { id: '00000000-0000-4000-8000-000000000103', value: '7', unit: 'ấp', label: 'Đơn vị hành chính', sortOrder: 2, isActive: true },
+    { id: '00000000-0000-4000-8000-000000000101', value: '7443', unit: 'km2', label: 'Diện tích tự nhiên', sortOrder: 0, isActive: true },
+    { id: '00000000-0000-4000-8000-000000000102', value: 'trên 40.000', unit: 'người', label: 'Dân số', sortOrder: 1, isActive: true },
+    { id: '00000000-0000-4000-8000-000000000103', value: '14', unit: 'ấp', label: 'Đơn vị hành chính', sortOrder: 2, isActive: true },
     { id: '00000000-0000-4000-8000-000000000104', value: '1979', unit: '', label: 'Năm thành lập', sortOrder: 3, isActive: true },
   ],
   highlightsSectionTitle: 'Điểm nổi bật',

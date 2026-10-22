@@ -21,6 +21,7 @@ describe('MediaController', () => {
       { buffer: Buffer.from('first') },
       { buffer: Buffer.from('second') },
     ] as Express.Multer.File[];
+    const buffers = files.map((file) => file.buffer);
 
     await expect(controller.uploadImages(files, user)).resolves.toEqual([
       firstMedia,
@@ -28,12 +29,13 @@ describe('MediaController', () => {
     ]);
     expect(mediaService.uploadImage).toHaveBeenNthCalledWith(1, {
       ownerId: user.id,
-      buffer: files[0].buffer,
+      buffer: buffers[0],
     });
     expect(mediaService.uploadImage).toHaveBeenNthCalledWith(2, {
       ownerId: user.id,
-      buffer: files[1].buffer,
+      buffer: buffers[1],
     });
+    expect(files.every((file) => file.buffer.length === 0)).toBe(true);
   });
 
   it('rejects an empty upload', async () => {

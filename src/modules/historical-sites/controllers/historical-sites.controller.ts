@@ -3,6 +3,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { Public } from '../../../common/decorators/public.decorator';
+import { mapLocationEtagPart } from '../../../common/utils/map-location-etag.util';
 import { QueryHistoricalSitePublicDto } from '../dto/query-historical-site.dto';
 import {
   HistoricalSiteListItemResponseDto,
@@ -38,7 +39,7 @@ export class HistoricalSitesController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<HistoricalSiteResponseDto | void> {
     const data = await this.service.publicDetail(id);
-    const etag = `"historical-site-${data.id}-${data.updatedAt.getTime()}"`;
+    const etag = `"historical-site-${data.id}-${data.updatedAt.getTime()}-${mapLocationEtagPart([data.mapLocation])}"`;
     response.setHeader('ETag', etag);
     response.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
     if (ifNoneMatch === etag) {

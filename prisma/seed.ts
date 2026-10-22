@@ -192,7 +192,7 @@ async function main(): Promise<void> {
         season: specialty.season,
         summary: specialty.summary,
         description: specialty.description,
-        buyPlaces: specialty.buyPlaces,
+        buyPlaces: specialty.buyPlaces as unknown as Prisma.InputJsonValue,
         mediaId: specialtyPlaceholderMedia?.id,
         imageAlt: specialty.name,
         sortOrder,

@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { UserRole, UserStatus } from '../../../../generated/prisma';
+import {
+  BusinessType,
+  type UserRole,
+  type UserStatus,
+} from '../../../../generated/prisma';
 import type { UserEntity } from '../entities/user.entity';
 
 export class UserResponseDto {
@@ -24,6 +28,14 @@ export class UserResponseDto {
   @ApiProperty({ enum: ['USER', 'BUSINESS', 'MODERATOR', 'ADMIN'] })
   role: UserRole;
 
+  @ApiPropertyOptional({
+    enum: BusinessType,
+    nullable: true,
+    description:
+      'Loại hình của tài khoản BUSINESS (null = GENERAL). TEMPLE_MANAGEMENT chỉ đăng được tin phi lợi nhuận.',
+  })
+  businessType: BusinessType | null;
+
   @ApiProperty({ enum: ['ACTIVE', 'BLOCKED', 'PENDING'] })
   status: UserStatus;
 
@@ -45,6 +57,7 @@ export class UserResponseDto {
     dto.displayName = entity.displayName;
     dto.avatarUrl = entity.avatarUrl;
     dto.role = entity.role;
+    dto.businessType = entity.businessType;
     dto.status = entity.status;
     dto.lastLoginAt = entity.lastLoginAt;
     dto.createdAt = entity.createdAt;

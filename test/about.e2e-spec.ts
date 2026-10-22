@@ -110,6 +110,11 @@ describe('About CMS (e2e)', () => {
       '00000000-0000-4000-8000-000000000101',
     ]);
     expect(response.headers.etag).toBe('"about-1"');
+
+    await request(app.getHttpServer())
+      .get('/api/v1/about')
+      .set('If-None-Match', '"about-1"')
+      .expect(304);
   });
 
   it('requires authentication and an admin role for admin APIs', async () => {

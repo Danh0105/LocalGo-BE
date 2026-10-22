@@ -1,8 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  ContentReviewTargetType,
   MediaResourceType,
   Prisma,
   type AgricultureItem,
+  type AgricultureItemImage,
   type Media,
   type User,
 } from '../../../../generated/prisma';
@@ -12,6 +14,7 @@ import { AppException } from '../../../common/exceptions/app.exception';
 import { slugify } from '../../../common/utils/slugify.util';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaService } from '../../media/services/media.service';
+import { ContentReviewService } from '../../content-reviews/services/content-review.service';
 import {
   ReorderAgricultureItemsDto,
   UpdateAgricultureItemStatusDto,
@@ -36,12 +39,17 @@ import {
 
 type AgricultureItemRecord = AgricultureItem & {
   media: Media | null;
+  galleryImages: Array<AgricultureItemImage & { media: Media }>;
   createdBy: Pick<User, 'displayName'> | null;
   updatedBy: Pick<User, 'displayName'> | null;
 };
 
 const includeAgricultureItem = {
   media: true,
+  galleryImages: {
+    orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }],
+    include: { media: true },
+  },
   createdBy: { select: { displayName: true } },
   updatedBy: { select: { displayName: true } },
 };
@@ -51,6 +59,7 @@ export class AgricultureService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly contentReviews: ContentReviewService,
   ) {}
 
   async publicList(
@@ -124,7 +133,15 @@ export class AgricultureService {
       select: { id: true },
     });
     if (duplicate) throw this.slugExists();
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds = dto.galleryMediaIds ?? [];
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.AGRICULTURE,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_AGRICULTURE_ITEM_MEDIA,
+    });
 
     const record = await this.prisma.$transaction(async (tx) => {
       const sortOrder = dto.sortOrder ?? (await this.nextSortOrder(tx));
@@ -134,6 +151,7 @@ export class AgricultureService {
           name: dto.name,
           category: AGRICULTURE_CATEGORY_TO_DB[dto.category],
           location: dto.location,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           season: dto.season,
           scale: dto.scale,
           summary: dto.summary,
@@ -146,10 +164,26 @@ export class AgricultureService {
           isActive: dto.isActive ?? true,
           createdById: actorId,
           updatedById: actorId,
+          ...(galleryMediaIds.length === 0
+            ? {}
+            : {
+                galleryImages: {
+                  create: galleryMediaIds.map((mediaId, index) => ({
+                    mediaId,
+                    sortOrder: index,
+                  })),
+                },
+              }),
         },
         include: includeAgricultureItem,
       });
-      await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.mediaService.claimContentImageSet(tx, {
+        mediaIds: [dto.mediaId, ...galleryMediaIds],
+        actorId,
+        resourceType: MediaResourceType.AGRICULTURE,
+        resourceId: id,
+        errorCode: ErrorCode.INVALID_AGRICULTURE_ITEM_MEDIA,
+      });
       await tx.auditLog.create({
         data: {
           actorId,
@@ -170,9 +204,19 @@ export class AgricultureService {
     dto: UpdateAgricultureItemDto,
   ): Promise<AgricultureAdminResponseDto> {
     const current = await this.findOrThrow(id);
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds =
+      dto.galleryMediaIds ??
+      current.galleryImages.map((image) => image.mediaId);
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.AGRICULTURE,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_AGRICULTURE_ITEM_MEDIA,
+    });
 
-    const { record, deletedMediaId } = await this.prisma.$transaction(
+    const { record, deletedMediaIds } = await this.prisma.$transaction(
       async (tx) => {
         const updated = await tx.agricultureItem.updateMany({
           where: { id, version: dto.version },
@@ -180,6 +224,9 @@ export class AgricultureService {
             name: dto.name,
             category: AGRICULTURE_CATEGORY_TO_DB[dto.category],
             location: dto.location,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             season: dto.season,
             scale: dto.scale,
             summary: dto.summary,
@@ -198,16 +245,38 @@ export class AgricultureService {
         });
         if (updated.count !== 1) throw await this.versionConflict(tx, id);
 
-        const deletedMediaId = await this.mediaService.releaseSingularMedia(
+        if (dto.galleryMediaIds !== undefined) {
+          await tx.agricultureItemImage.deleteMany({
+            where: { agricultureItemId: id },
+          });
+          if (galleryMediaIds.length > 0)
+            await tx.agricultureItemImage.createMany({
+              data: galleryMediaIds.map((mediaId, index) => ({
+                agricultureItemId: id,
+                mediaId,
+                sortOrder: index,
+              })),
+            });
+        }
+        await this.mediaService.claimContentImageSet(tx, {
+          mediaIds: [dto.mediaId, ...galleryMediaIds],
+          actorId,
+          resourceType: MediaResourceType.AGRICULTURE,
+          resourceId: id,
+          errorCode: ErrorCode.INVALID_AGRICULTURE_ITEM_MEDIA,
+        });
+        const deletedMediaIds = await this.mediaService.releaseContentImageSet(
           tx,
           {
-            previousMediaId: current.mediaId,
-            nextMediaId: dto.mediaId ?? null,
+            previousMediaIds: [
+              current.mediaId,
+              ...current.galleryImages.map((image) => image.mediaId),
+            ],
+            nextMediaIds: [dto.mediaId, ...galleryMediaIds],
             resourceType: MediaResourceType.AGRICULTURE,
             resourceId: id,
           },
         );
-        await this.claimMedia(tx, dto.mediaId, actorId, id);
         await tx.auditLog.create({
           data: {
             actorId,
@@ -222,10 +291,10 @@ export class AgricultureService {
           where: { id },
           include: includeAgricultureItem,
         });
-        return { record, deletedMediaId };
+        return { record, deletedMediaIds };
       },
     );
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
     return this.toAdminDto(record);
   }
 
@@ -310,14 +379,25 @@ export class AgricultureService {
 
   async remove(actorId: string, id: string): Promise<void> {
     const current = await this.findOrThrow(id);
-    const deletedMediaId = await this.prisma.$transaction(async (tx) => {
+    const deletedMediaIds = await this.prisma.$transaction(async (tx) => {
       await tx.agricultureItem.delete({ where: { id } });
-      const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
-        previousMediaId: current.mediaId,
-        nextMediaId: null,
-        resourceType: MediaResourceType.AGRICULTURE,
-        resourceId: id,
-      });
+      const reviewMediaIds = await this.contentReviews.deleteForRecord(
+        tx,
+        ContentReviewTargetType.AGRICULTURE,
+        id,
+      );
+      const deletedMediaIds = await this.mediaService.releaseContentImageSet(
+        tx,
+        {
+          previousMediaIds: [
+            current.mediaId,
+            ...current.galleryImages.map((image) => image.mediaId),
+          ],
+          nextMediaIds: [],
+          resourceType: MediaResourceType.AGRICULTURE,
+          resourceId: id,
+        },
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -326,9 +406,9 @@ export class AgricultureService {
           resourceId: id,
         },
       });
-      return deletedMediaId;
+      return [...deletedMediaIds, ...reviewMediaIds];
     });
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
   }
 
   private async findOrThrow(id: string): Promise<AgricultureItemRecord> {
@@ -348,6 +428,7 @@ export class AgricultureService {
       name: record.name,
       category: AGRICULTURE_CATEGORY_FROM_DB[record.category],
       location: record.location,
+      googleMapsUrl: record.googleMapsUrl,
       season: record.season,
       scale: record.scale,
       summary: record.summary,
@@ -364,6 +445,12 @@ export class AgricultureService {
       description: this.readStringArray(record.description),
       highlights: this.readStringArray(record.highlights),
       support: record.support,
+      galleryImages: record.galleryImages.map((image) => ({
+        mediaId: image.mediaId,
+        imageUrl: image.media.originalUrl,
+        thumbnailUrl: image.media.thumbnailUrl,
+        sortOrder: image.sortOrder,
+      })),
     };
   }
 
@@ -373,6 +460,7 @@ export class AgricultureService {
     return {
       ...this.toPublicDto(record),
       mediaId: record.mediaId,
+      galleryMediaIds: record.galleryImages.map((image) => image.mediaId),
       isActive: record.isActive,
       version: record.version,
       createdAt: record.createdAt,

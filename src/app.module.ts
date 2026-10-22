@@ -32,11 +32,16 @@ import { CraftVillagesModule } from './modules/craft-villages/craft-villages.mod
 import { CuisineModule } from './modules/cuisine/cuisine.module';
 import { FestivalsModule } from './modules/festivals/festivals.module';
 import { ExperienceToursModule } from './modules/experience-tours/experience-tours.module';
+import { ContentReviewsModule } from './modules/content-reviews/content-reviews.module';
 import { FeedbackModule } from './modules/feedback/feedback.module';
 import { MapPlacesModule } from './modules/map-places/map-places.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { NewsModule } from './modules/news/news.module';
 import { ChatbotModule } from './modules/chatbot/chatbot.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { MapLocationModule } from './modules/map-location/map-location.module';
+import { HarvestBatchesModule } from './modules/harvest-batches/harvest-batches.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -61,11 +66,10 @@ import { ChatbotModule } from './modules/chatbot/chatbot.module';
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => {
         const config = configService.getOrThrow<AppConfig>('app');
-        // Rate limiting is a production/dev abuse-prevention concern — it must
-        // not throttle the e2e test suite itself, which legitimately performs
-        // many rapid logins (one per test fixture) well beyond the per-route
-        // @Throttle() limits (e.g. 5 logins/min on /auth/zalo).
-        const isTestEnv = config.nodeEnv === 'test';
+        // Rate limiting is opt-in so deployments can bypass both the global
+        // default and every per-route @Throttle() limit. Tests always bypass it.
+        const skipRateLimit =
+          !config.rateLimitEnabled || config.nodeEnv === 'test';
         return {
           throttlers: [
             {
@@ -74,7 +78,7 @@ import { ChatbotModule } from './modules/chatbot/chatbot.module';
               limit: config.rateLimitLimit,
             },
           ],
-          skipIf: () => isTestEnv,
+          skipIf: () => skipRateLimit,
         };
       },
       inject: [ConfigService],
@@ -100,11 +104,16 @@ import { ChatbotModule } from './modules/chatbot/chatbot.module';
     CuisineModule,
     FestivalsModule,
     ExperienceToursModule,
+    ContentReviewsModule,
     FeedbackModule,
     MapPlacesModule,
     ContactsModule,
     NewsModule,
     ChatbotModule,
+    NotificationsModule,
+    MapLocationModule,
+    HarvestBatchesModule,
+    SearchModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

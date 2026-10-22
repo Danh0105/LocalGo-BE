@@ -15,13 +15,22 @@ import {
 import { PrismaService } from '../../../../database/prisma.service';
 import { MediaService } from '../../../media/services/media.service';
 import type { AuthenticatedUser } from '../../../auth/types/authenticated-user.interface';
+import {
+  NotificationType,
+  excerpt,
+} from '../../../notifications/notification-types';
+import { NotificationService } from '../../../notifications/services/notification.service';
 import { TradePostRepository } from '../../posts/repositories/trade-post.repository';
 import { MAX_TRADE_REVIEW_IMAGES } from '../../trade.constants';
 import { CreateTradeReviewDto } from '../dto/create-trade-review.dto';
 import { QueryTradeReviewAdminDto } from '../dto/query-trade-review-admin.dto';
+import { TradeReviewAdminStatsResponseDto } from '../dto/trade-review-admin-response.dto';
 import { TradeReviewSummaryResponseDto } from '../dto/trade-review-summary-response.dto';
 import { UpdateTradeReviewDto } from '../dto/update-trade-review.dto';
-import { TradeReviewEntity } from '../entities/trade-review.entity';
+import {
+  TradeReviewEntity,
+  type TradeReviewCustomerReplyView,
+} from '../entities/trade-review.entity';
 import { TradeReviewRepository } from '../repositories/trade-review.repository';
 import { TradeRatingService } from './trade-rating.service';
 import { AuditLogService } from '../../../audit-log/services/audit-log.service';
@@ -35,6 +44,7 @@ export class TradeReviewService {
     private readonly auditLogService: AuditLogService,
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly notifications: NotificationService,
   ) {}
 
   async create(
@@ -102,6 +112,8 @@ export class TradeReviewService {
             userId: user.id,
             rating: dto.rating,
             content: dto.content,
+            // Reviews are post-moderated: public at once, admins may hide later.
+            status: TradeReviewStatus.PUBLISHED,
           },
         });
 
@@ -115,10 +127,31 @@ export class TradeReviewService {
           });
         }
 
+        await this.tradeRatingService.recompute(tx, tradePostId);
+
         return created;
       });
 
-      return this.getDetailEntityOrThrow(review.id);
+      const entity = await this.getDetailEntityOrThrow(review.id);
+      await this.notifications.notify(tradePost.ownerId, {
+        type: NotificationType.TRADE_REVIEW_RECEIVED,
+        title: 'Đánh giá mới',
+        body: `${entity.reviewer?.displayName ?? 'Khách hàng'} đánh giá ${entity.rating}★ tin "${excerpt(tradePost.title, 80)}": ${excerpt(entity.content, 100)}`,
+        data: this.reviewNotificationData(entity),
+      });
+      await this.notifications.notifyStaff(
+        {
+          type: NotificationType.TRADE_REVIEW_SUBMITTED,
+          title: 'Đánh giá giao thương mới',
+          body: `${entity.reviewer?.displayName ?? user.displayName} vừa đánh giá ${entity.rating}★ tin "${excerpt(tradePost.title, 80)}": ${excerpt(entity.content, 100)}`,
+          data: {
+            ...this.reviewNotificationData(entity),
+            submittedById: user.id,
+          },
+        },
+        [tradePost.ownerId, user.id],
+      );
+      return entity;
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -143,9 +176,6 @@ export class TradeReviewService {
     assertCanManage(user, { ownerId: existing.userId }, []);
 
     const mediaIds = dto.imageIds;
-    const willRevertToPending =
-      existing.status === TradeReviewStatus.PUBLISHED &&
-      (dto.rating !== undefined || dto.content !== undefined);
 
     let removedMediaIds: string[] = [];
     await this.prisma.$transaction(async (tx) => {
@@ -187,21 +217,21 @@ export class TradeReviewService {
         }
       }
 
+      // Edits keep the current status: no re-moderation, and a review an
+      // admin hid stays hidden.
       await tx.tradeReview.update({
         where: { id },
         data: {
           ...(dto.rating !== undefined ? { rating: dto.rating } : {}),
           ...(dto.content !== undefined ? { content: dto.content } : {}),
-          // Content edits require re-moderation, mirroring the trade-post rule.
-          ...(dto.rating !== undefined || dto.content !== undefined
-            ? { status: TradeReviewStatus.PENDING }
-            : {}),
         },
       });
 
-      // The edit dropped a previously-counted PUBLISHED review back to
-      // PENDING — the post's aggregate must reflect that immediately.
-      if (willRevertToPending) {
+      // A new rating on a counted review shifts the post's aggregate.
+      if (
+        dto.rating !== undefined &&
+        existing.status === TradeReviewStatus.PUBLISHED
+      ) {
         await this.tradeRatingService.recompute(tx, existing.tradePostId);
       }
     });
@@ -237,20 +267,66 @@ export class TradeReviewService {
       newData: { status },
     });
 
-    return this.getDetailEntityOrThrow(id);
+    const postTitle = excerpt(
+      existing.tradePost?.title ?? 'tin giao thương',
+      80,
+    );
+    if (
+      status === TradeReviewStatus.PUBLISHED &&
+      existing.status !== TradeReviewStatus.PUBLISHED
+    ) {
+      // The post owner already heard about the review when it was created.
+      await this.notifyReviewer(
+        existing,
+        NotificationType.TRADE_REVIEW_APPROVED,
+        'Đánh giá đã hiển thị lại',
+        `Đánh giá của bạn về "${postTitle}" đã được hiển thị công khai trở lại.`,
+      );
+    } else if (
+      status === TradeReviewStatus.HIDDEN &&
+      existing.status !== TradeReviewStatus.HIDDEN
+    ) {
+      await this.notifyReviewer(
+        existing,
+        NotificationType.TRADE_REVIEW_HIDDEN,
+        'Đánh giá bị ẩn',
+        `Đánh giá của bạn về "${postTitle}" đã bị quản trị viên ẩn.`,
+      );
+    }
+
+    return this.getAdminDetailOrThrow(id);
   }
 
   async remove(user: AuthenticatedUser, id: string): Promise<void> {
     const existing = await this.getActiveOrThrow(id);
     assertCanManage(user, { ownerId: existing.userId });
+    await this.softDeleteAndRecompute(existing);
+  }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.tradeReview.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      });
-      await this.tradeRatingService.recompute(tx, existing.tradePostId);
+  /** Moderator/admin only — gated by RolesGuard at the controller. */
+  async removeByAdmin(actorId: string, id: string): Promise<void> {
+    const existing = await this.getActiveOrThrow(id);
+    const deletedAt = await this.softDeleteAndRecompute(existing);
+
+    await this.auditLogService.write({
+      actorId,
+      action: 'TRADE_REVIEW_DELETE',
+      resourceType: 'TradeReview',
+      resourceId: id,
+      oldData: {
+        status: existing.status,
+        rating: existing.rating,
+        content: existing.content,
+        deletedAt: null,
+      },
+      newData: { deletedAt: deletedAt.toISOString() },
     });
+    await this.notifyReviewer(
+      existing,
+      NotificationType.TRADE_REVIEW_DELETED,
+      'Đánh giá bị xóa',
+      `Đánh giá của bạn về "${excerpt(existing.tradePost?.title ?? 'tin giao thương', 80)}" đã bị quản trị viên xóa.`,
+    );
   }
 
   async attachImage(
@@ -321,7 +397,29 @@ export class TradeReviewService {
       where: {
         ...(query.status ? { status: query.status } : {}),
         ...(query.tradePostId ? { tradePostId: query.tradePostId } : {}),
+        ...(query.rating ? { rating: query.rating } : {}),
+        ...(query.search
+          ? {
+              OR: [
+                { content: { contains: query.search, mode: 'insensitive' } },
+                {
+                  user: {
+                    displayName: {
+                      contains: query.search,
+                      mode: 'insensitive',
+                    },
+                  },
+                },
+                {
+                  tradePost: {
+                    title: { contains: query.search, mode: 'insensitive' },
+                  },
+                },
+              ],
+            }
+          : {}),
       },
+      sortOrder: query.sortOrder,
     });
     return paginate(
       items.map((item) => new TradeReviewEntity(item)),
@@ -329,6 +427,33 @@ export class TradeReviewService {
       query.limit,
       total,
     );
+  }
+
+  /** Moderator/admin only — gated by RolesGuard at the controller. */
+  async getAdminDetail(id: string): Promise<TradeReviewEntity> {
+    return this.getAdminDetailOrThrow(id);
+  }
+
+  /** Moderator/admin only — counts per status for the moderation queue tabs. */
+  async getAdminStats(
+    tradePostId?: string,
+  ): Promise<TradeReviewAdminStatsResponseDto> {
+    const rows = await this.tradeReviewRepository.countByStatus(
+      tradePostId ? { tradePostId } : {},
+    );
+    const byStatus: TradeReviewAdminStatsResponseDto['byStatus'] = {
+      PENDING: 0,
+      PUBLISHED: 0,
+      HIDDEN: 0,
+    };
+    for (const row of rows) {
+      byStatus[row.status] = row.count;
+    }
+
+    const dto = new TradeReviewAdminStatsResponseDto();
+    dto.byStatus = byStatus;
+    dto.total = byStatus.PENDING + byStatus.PUBLISHED + byStatus.HIDDEN;
+    return dto;
   }
 
   async listPublicForPost(
@@ -400,6 +525,181 @@ export class TradeReviewService {
     return dto;
   }
 
+  /** Seller center: published reviews on the caller's own posts. */
+  async listForPostOwner(
+    ownerId: string,
+    page: number,
+    limit: number,
+  ): Promise<PaginatedResultDto<TradeReviewEntity>> {
+    const { skip, take } = buildPaginationArgs(page, limit);
+    const { items, total } = await this.tradeReviewRepository.findForPostOwner({
+      ownerId,
+      skip,
+      take,
+    });
+    return paginate(
+      items.map((item) => new TradeReviewEntity(item)),
+      page,
+      limit,
+      total,
+    );
+  }
+
+  /** Creates a public customer message below an existing seller reply. */
+  async createCustomerReply(
+    user: AuthenticatedUser,
+    tradePostId: string,
+    reviewId: string,
+    content: string,
+  ): Promise<TradeReviewCustomerReplyView> {
+    return this.prisma.$transaction(async (tx) => {
+      const target = await this.tradeReviewRepository.lockCustomerReplyTarget(
+        tx,
+        tradePostId,
+        reviewId,
+      );
+      const expiry = target?.expiresAt ?? target?.eventEndAt ?? null;
+      const isPublic =
+        target !== null &&
+        target.reviewDeletedAt === null &&
+        target.reviewStatus === TradeReviewStatus.PUBLISHED &&
+        target.postDeletedAt === null &&
+        target.postStatus === TradePostStatus.PUBLISHED &&
+        target.categoryActive &&
+        target.categoryDeletedAt === null &&
+        (expiry === null || expiry.getTime() > Date.now());
+
+      if (!target || !isPublic) {
+        throw new AppException(
+          ErrorCode.RESOURCE_NOT_FOUND,
+          'Không tìm thấy tin đăng hoặc đánh giá công khai',
+          HttpStatus.NOT_FOUND,
+        );
+      }
+
+      if (target.ownerId === user.id) {
+        throw new AppException(
+          ErrorCode.TRADE_REVIEW_CUSTOMER_REPLY_NOT_ALLOWED,
+          'Chủ tin không thể dùng luồng trả lời dành cho khách hàng',
+          HttpStatus.FORBIDDEN,
+        );
+      }
+
+      if (target.replyContent === null) {
+        throw new AppException(
+          ErrorCode.TRADE_REVIEW_OWNER_REPLY_REQUIRED,
+          'Phản hồi của chủ tin không còn tồn tại',
+          HttpStatus.CONFLICT,
+        );
+      }
+
+      const reply = await this.tradeReviewRepository.createCustomerReply(tx, {
+        reviewId,
+        userId: user.id,
+        content: content.trim(),
+      });
+      return {
+        id: reply.id,
+        reviewId: reply.reviewId,
+        userId: reply.userId,
+        content: reply.content,
+        createdAt: reply.createdAt,
+        author: reply.author
+          ? {
+              id: reply.author.id,
+              displayName: reply.author.displayName,
+              avatarUrl: reply.author.avatarUrl,
+            }
+          : null,
+      };
+    });
+  }
+
+  /** Sets (or replaces) the post owner's public reply; the review itself is untouched. */
+  async reply(
+    user: AuthenticatedUser,
+    id: string,
+    content: string,
+  ): Promise<TradeReviewEntity> {
+    await this.assertCanReply(user, id);
+    await this.prisma.tradeReview.update({
+      where: { id },
+      data: { replyContent: content.trim(), repliedAt: new Date() },
+    });
+    const review = await this.getDetailEntityOrThrow(id);
+    await this.notifyReviewer(
+      review,
+      NotificationType.TRADE_REVIEW_REPLIED,
+      'Người bán đã phản hồi đánh giá',
+      `Phản hồi về "${excerpt(review.tradePost?.title ?? 'tin giao thương', 80)}": ${excerpt(content, 150)}`,
+    );
+    return review;
+  }
+
+  private notifyReviewer(
+    review: TradeReviewEntity,
+    type: NotificationType,
+    title: string,
+    body: string,
+  ): Promise<void> {
+    return this.notifications.notify(review.userId, {
+      type,
+      title,
+      body,
+      data: this.reviewNotificationData(review),
+    });
+  }
+
+  private reviewNotificationData(review: TradeReviewEntity) {
+    return {
+      tradePostId: review.tradePostId,
+      slug: review.tradePost?.slug,
+      reviewId: review.id,
+    };
+  }
+
+  async removeReply(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<TradeReviewEntity> {
+    await this.assertCanReply(user, id);
+    await this.prisma.tradeReview.update({
+      where: { id },
+      data: { replyContent: null, repliedAt: null },
+    });
+    return this.getDetailEntityOrThrow(id);
+  }
+
+  /** Only the owner of the reviewed post may reply, and only to a visible review. */
+  private async assertCanReply(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<void> {
+    const review = await this.prisma.tradeReview.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        status: TradeReviewStatus.PUBLISHED,
+        tradePost: { deletedAt: null },
+      },
+      select: { tradePost: { select: { ownerId: true } } },
+    });
+    if (!review) {
+      throw new AppException(
+        ErrorCode.RESOURCE_NOT_FOUND,
+        'Không tìm thấy đánh giá',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (review.tradePost.ownerId !== user.id) {
+      throw new AppException(
+        ErrorCode.REVIEW_REPLY_NOT_ALLOWED,
+        'Chỉ người đăng tin mới được phản hồi đánh giá này',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
   private async getActiveOrThrow(id: string): Promise<TradeReviewEntity> {
     const review = await this.tradeReviewRepository.findDetailById(id);
     if (!review) {
@@ -414,5 +714,35 @@ export class TradeReviewService {
 
   private async getDetailEntityOrThrow(id: string): Promise<TradeReviewEntity> {
     return this.getActiveOrThrow(id);
+  }
+
+  private async getAdminDetailOrThrow(id: string): Promise<TradeReviewEntity> {
+    const review = await this.tradeReviewRepository.findAdminDetailById(id);
+    if (!review) {
+      throw new AppException(
+        ErrorCode.RESOURCE_NOT_FOUND,
+        'Không tìm thấy đánh giá',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return new TradeReviewEntity(review);
+  }
+
+  /**
+   * Soft-deletes a review and recomputes the post's rating in the same
+   * transaction (a PUBLISHED review leaving the set changes the aggregate).
+   */
+  private async softDeleteAndRecompute(
+    review: TradeReviewEntity,
+  ): Promise<Date> {
+    const deletedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.tradeReview.update({
+        where: { id: review.id },
+        data: { deletedAt },
+      });
+      await this.tradeRatingService.recompute(tx, review.tradePostId);
+    });
+    return deletedAt;
   }
 }

@@ -18,7 +18,9 @@ Module `historical-sites` quản lý danh sách nhiều di tích lịch sử. M�
 
 Public list chỉ trả dữ liệu cần cho thẻ danh sách. Public detail trả thêm `history` và `highlights`. Public API không phân biệt bản ghi không tồn tại và bản ghi đang ẩn: cả hai đều trả `404 HISTORICAL_SITE_NOT_FOUND`.
 
-`GET /historical-sites/:id` trả `ETag: "historical-site-{id}-{updatedAtMillis}"` và `Cache-Control: public, max-age=60, must-revalidate`. Mọi thao tác cập nhật làm đổi `updatedAt`, vì vậy ETag cũ tự mất hiệu lực.
+`GET /historical-sites/:id` trả ETag gồm `id`, `updatedAt` và hash trạng thái
+định vị, cùng `Cache-Control: public, max-age=60, must-revalidate`. ETag đổi khi
+nội dung hoặc kết quả worker đổi.
 
 ## Request tạo/cập nhật
 
@@ -33,6 +35,7 @@ Public list chỉ trả dữ liệu cần cho thẻ danh sách. Public detail tr
   "history": ["Đoạn 1", "Đoạn 2"],
   "highlights": ["Đoạn địa đạo được phục dựng", "Không gian trưng bày hiện vật"],
   "mediaId": "uuid-media",
+  "galleryMediaIds": ["uuid-media-2", "uuid-media-3"],
   "imageAlt": "Địa đạo Truông Mít",
   "isActive": true
 }
@@ -47,6 +50,8 @@ Khi `version` cũ, API trả `409 HISTORICAL_SITE_VERSION_CONFLICT`; `error.deta
 1. Upload JPEG/PNG/WebP bằng `POST /api/v1/media/images` với Bearer token.
 2. Dùng `data.id` làm `mediaId` khi tạo/cập nhật di tích.
 3. Backend xác minh media chưa xóa, MIME bắt đầu bằng `image/`, thuộc người gọi và chưa được nội dung khác sử dụng. Media được claim thành resource `HISTORICAL_SITE` trong cùng transaction ghi nội dung.
+
+Có thể upload tối đa 10 ảnh/lần qua `POST /api/v1/media/images/batch` (multipart field `files`). `mediaId` là ảnh đại diện; `galleryMediaIds` chứa tối đa 10 ảnh thư viện theo thứ tự hiển thị và không được lặp ảnh đại diện. Public/admin detail trả `galleryImages`; admin response trả thêm `galleryMediaIds`.
 
 Seed không hard-code domain CDN hay đường dẫn máy local. Có thể upload một ảnh placeholder vào media storage của môi trường, sau đó đặt `HISTORICAL_SITE_PLACEHOLDER_MEDIA_ID` trước khi chạy seed. Nếu không đặt, seed vẫn tạo đủ nội dung với `mediaId = null`; admin có thể gắn ảnh sau.
 

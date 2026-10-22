@@ -26,7 +26,11 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, 'jwt') {
     const user = await this.userService
       .getProfile(payload.sub)
       .catch(() => null);
-    if (!user || user.status === UserStatus.BLOCKED) {
+    if (
+      !user ||
+      user.status === UserStatus.BLOCKED ||
+      (payload.cv ?? 0) !== user.credentialVersion
+    ) {
       throw new UnauthorizedException();
     }
     return {

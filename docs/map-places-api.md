@@ -4,23 +4,31 @@ Module `map-places` quản lý danh sách điểm hiển thị trên bản đồ
 
 ## Endpoints
 
-| Method | Endpoint                                              | Quyền            | Mô tả                                                       |
-| ------ | -------------------------------------------------------- | ---------------- | ------------------------------------------------------------ |
-| GET    | `/map-places?category=Du lịch`                            | Public           | Chỉ bản ghi active, sắp xếp `sortOrder`, `createdAt`, `id`   |
-| GET    | `/map-places/:id`                                          | Public           | Chi tiết active, gồm `description`, `highlights`, `directionNote` |
-| GET    | `/admin/map-places?page=1&limit=20&category=&search=`     | ADMIN, MODERATOR | Danh sách gồm cả bản ghi ẩn, tìm theo tên/địa chỉ             |
-| GET    | `/admin/map-places/:id`                                    | ADMIN, MODERATOR | Chi tiết và `version` hiện tại                                |
-| POST   | `/admin/map-places`                                        | ADMIN, MODERATOR | Tạo mới, tự sinh slug nếu không gửi `id`                      |
-| PUT    | `/admin/map-places/:id`                                    | ADMIN, MODERATOR | Cập nhật toàn bộ với optimistic locking                       |
-| PATCH  | `/admin/map-places/:id/status`                             | ADMIN, MODERATOR | Ẩn/hiện với optimistic locking                                |
-| PATCH  | `/admin/map-places/reorder`                                | ADMIN, MODERATOR | Cập nhật thứ tự hàng loạt trong transaction                   |
-| DELETE | `/admin/map-places/:id`                                    | ADMIN, MODERATOR | Xóa điểm bản đồ                                                |
+| Method | Endpoint                                              | Quyền            | Mô tả                                                             |
+| ------ | ----------------------------------------------------- | ---------------- | ----------------------------------------------------------------- |
+| GET    | `/map-places?category=Du lịch&search=tham quan`       | Public           | Chỉ bản ghi active; lọc danh mục và tìm kiếm gần đúng             |
+| GET    | `/map-places/:id`                                     | Public           | Chi tiết active, gồm `description`, `highlights`, `directionNote` |
+| GET    | `/admin/map-places?page=1&limit=20&category=&search=` | ADMIN, MODERATOR | Danh sách gồm cả bản ghi ẩn, tìm theo tên/địa chỉ                 |
+| GET    | `/admin/map-places/:id`                               | ADMIN, MODERATOR | Chi tiết và `version` hiện tại                                    |
+| POST   | `/admin/map-places`                                   | ADMIN, MODERATOR | Tạo mới, tự sinh slug nếu không gửi `id`                          |
+| PUT    | `/admin/map-places/:id`                               | ADMIN, MODERATOR | Cập nhật toàn bộ với optimistic locking                           |
+| PATCH  | `/admin/map-places/:id/status`                        | ADMIN, MODERATOR | Ẩn/hiện với optimistic locking                                    |
+| PATCH  | `/admin/map-places/reorder`                           | ADMIN, MODERATOR | Cập nhật thứ tự hàng loạt trong transaction                       |
+| DELETE | `/admin/map-places/:id`                               | ADMIN, MODERATOR | Xóa điểm bản đồ                                                   |
 
 Public list trả cả `coordinates` cho mỗi bản ghi (cần thiết để vẽ marker ngay ở màn danh sách/bản đồ), cùng `name`, `category`, `address`, `openTime`, `distanceFromCenter`, `summary`, `imageUrl`, `imageAlt`, `sortOrder`, `updatedAt`. Public detail trả thêm `description`, `highlights`, `directionNote`. Public API không phân biệt bản ghi không tồn tại và bản ghi đang ẩn: cả hai đều trả `404 MAP_PLACE_NOT_FOUND`.
 
-`GET /map-places/:id` trả `ETag: "map-place-{id}-{updatedAtMillis}"` và `Cache-Control: public, max-age=60, must-revalidate`. Mọi thao tác cập nhật làm đổi `updatedAt`, vì vậy ETag cũ tự mất hiệu lực.
+`GET /map-places/:id` trả ETag gồm `id`, `updatedAt` và hash trạng thái định vị,
+cùng `Cache-Control: public, max-age=60, must-revalidate`. ETag đổi khi nội dung
+hoặc kết quả worker đổi.
 
 Ở quy mô dữ liệu hiện tại (vài chục điểm), public list trả toàn bộ bản ghi active thay vì hỗ trợ `bbox`/bán kính; nếu số điểm tăng lớn, bổ sung lọc theo vùng nhìn thấy sau, không cần đổi response envelope.
+
+Public list nhận `search` dài 2–100 ký tự. Tìm kiếm áp dụng trên tên, slug, danh
+mục, địa chỉ, giờ mở cửa, tóm tắt và nội dung chi tiết; không phân biệt dấu,
+hoa/thường, hỗ trợ tiền tố và lỗi gõ nhẹ. Các cụm từ liên quan được quy về cùng
+chủ đề, ví dụ `ăn uống` ↔ `ẩm thực`, `tham quan` ↔ `du lịch`, `chùa chiền` ↔
+`chùa`, và `ủy ban nhân dân` ↔ `UBND`. Có thể kết hợp `search` với `category`.
 
 ## Tọa độ (`coordinates`)
 

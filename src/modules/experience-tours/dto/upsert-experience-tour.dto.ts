@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsIn,
@@ -18,6 +19,8 @@ import {
   EXPERIENCE_TOUR_CATEGORIES,
   type ExperienceTourCategoryLabel,
 } from '../experience-tour.constants';
+import { IsGoogleMapsUrl } from '../../../common/validation/google-maps-url.validator';
+import { MAX_CONTENT_GALLERY_IMAGES } from '../../media/media.constants';
 
 const trim = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
@@ -67,6 +70,17 @@ export class ExperienceTourContentDto {
   @MinLength(1)
   @MaxLength(255)
   meetingPoint: string;
+
+  @ApiPropertyOptional({
+    maxLength: 2048,
+    example: 'https://maps.app.goo.gl/example',
+  })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(2048)
+  @IsGoogleMapsUrl()
+  googleMapsUrl?: string;
 
   @ApiProperty({ maxLength: 300 })
   @Transform(trim)
@@ -133,6 +147,18 @@ export class ExperienceTourContentDto {
   @IsOptional()
   @IsUUID()
   mediaId?: string | null;
+
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: MAX_CONTENT_GALLERY_IMAGES,
+    description: 'ID các ảnh thư viện theo thứ tự hiển thị.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_CONTENT_GALLERY_IMAGES)
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  galleryMediaIds?: string[];
 
   @ApiProperty({ maxLength: 150 })
   @Transform(trim)

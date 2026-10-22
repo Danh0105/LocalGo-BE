@@ -9,13 +9,125 @@ import {
   paginate,
 } from '../../../common/pagination/pagination.util';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.interface';
+import { CreateAdminUserDto } from '../dto/create-admin-user.dto';
 import { QueryAdminUsersDto } from '../dto/query-admin-users.dto';
 import { UserEntity } from '../entities/user.entity';
 import { UserRepository } from '../repositories/user.repository';
+import { MediaService } from '../../media/services/media.service';
+import type { UserDeletionImpactDto } from '../dto/user-deletion-impact.dto';
 
 @Injectable()
 export class UserAdminService {
-  constructor(private readonly userRepository: UserRepository) {}
+  constructor(
+    private readonly userRepository: UserRepository,
+    private readonly mediaService: MediaService,
+  ) {}
+
+  private assertAdmin(actor: AuthenticatedUser): void {
+    if (actor.role !== UserRole.ADMIN) {
+      throw new AppException(
+        ErrorCode.INSUFFICIENT_PERMISSION,
+        'Chỉ quản trị viên mới được xóa tài khoản',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
+  private async findDeletionTarget(actor: AuthenticatedUser, targetId: string) {
+    this.assertAdmin(actor);
+    if (actor.id === targetId) {
+      throw new AppException(
+        ErrorCode.CANNOT_DELETE_SELF,
+        'Bạn không thể xóa tài khoản đang đăng nhập.',
+        HttpStatus.CONFLICT,
+      );
+    }
+    const target = await this.userRepository.findById(targetId);
+    if (!target) {
+      throw new AppException(
+        ErrorCode.USER_NOT_FOUND,
+        'Không tìm thấy người dùng',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return target;
+  }
+
+  async getDeletionImpact(
+    actor: AuthenticatedUser,
+    targetId: string,
+  ): Promise<UserDeletionImpactDto> {
+    const target = await this.findDeletionTarget(actor, targetId);
+    const counts = await this.userRepository.getDeletionCounts(targetId);
+    return {
+      userId: target.id,
+      displayName: target.displayName,
+      email: target.email,
+      role: target.role,
+      counts,
+    };
+  }
+
+  async deleteAccount(
+    actor: AuthenticatedUser,
+    targetId: string,
+  ): Promise<void> {
+    await this.findDeletionTarget(actor, targetId);
+    const mediaIds = await this.userRepository.deleteAccountAndRelatedData({
+      actorId: actor.id,
+      targetId,
+    });
+    await this.mediaService.purgeStorage(mediaIds);
+    await this.userRepository.hardDeleteMedia(mediaIds);
+  }
+
+  async createUser(
+    actor: AuthenticatedUser,
+    dto: CreateAdminUserDto,
+  ): Promise<UserEntity> {
+    if (actor.role !== UserRole.ADMIN) {
+      throw new AppException(
+        ErrorCode.INSUFFICIENT_PERMISSION,
+        'Chỉ quản trị viên mới được tạo tài khoản',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    if (dto.role === UserRole.ADMIN) {
+      throw new AppException(
+        ErrorCode.INSUFFICIENT_PERMISSION,
+        'Không được phép tạo thêm tài khoản quản trị viên',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    const email = dto.email.trim().toLowerCase();
+    if (await this.userRepository.emailExists(email)) {
+      throw new AppException(
+        ErrorCode.EMAIL_ALREADY_EXISTS,
+        'Email đã được sử dụng',
+        HttpStatus.CONFLICT,
+      );
+    }
+    const phone = dto.phone?.trim() || null;
+    if (phone && (await this.userRepository.phoneExists(phone))) {
+      throw new AppException(
+        ErrorCode.PHONE_ALREADY_EXISTS,
+        'Số điện thoại đã được sử dụng',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    const passwordHash = await argon2.hash(dto.password);
+    const created = await this.userRepository.createUserWithAudit({
+      actorId: actor.id,
+      displayName: dto.displayName.trim(),
+      email,
+      phone,
+      passwordHash,
+      role: dto.role,
+    });
+    return new UserEntity(created);
+  }
 
   async list(
     query: QueryAdminUsersDto,
@@ -112,6 +224,13 @@ export class UserAdminService {
     targetId: string,
     password: string,
   ): Promise<UserEntity> {
+    if (actor.role !== UserRole.ADMIN) {
+      throw new AppException(
+        ErrorCode.INSUFFICIENT_PERMISSION,
+        'Chỉ quản trị viên mới được đặt lại mật khẩu người dùng',
+        HttpStatus.FORBIDDEN,
+      );
+    }
     const target = await this.userRepository.findById(targetId);
     if (!target) {
       throw new AppException(
@@ -120,14 +239,6 @@ export class UserAdminService {
         HttpStatus.NOT_FOUND,
       );
     }
-    if (actor.role === UserRole.MODERATOR && target.role === UserRole.ADMIN) {
-      throw new AppException(
-        ErrorCode.INSUFFICIENT_PERMISSION,
-        'Kiểm duyệt viên không được đặt lại mật khẩu quản trị viên',
-        HttpStatus.FORBIDDEN,
-      );
-    }
-
     const passwordHash = await argon2.hash(password);
     const updated = await this.userRepository.updatePasswordAndRevokeSessions({
       actorId: actor.id,

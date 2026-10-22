@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  ContentReviewTargetType,
   MediaResourceType,
+  MapLocationSource,
   Prisma,
   type Media,
   type Temple,
@@ -13,6 +15,9 @@ import { AppException } from '../../../common/exceptions/app.exception';
 import { slugify } from '../../../common/utils/slugify.util';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaService } from '../../media/services/media.service';
+import { ContentReviewService } from '../../content-reviews/services/content-review.service';
+import { MapLocationService } from '../../map-location/map-location.service';
+import type { MapLocationResponseDto } from '../../../common/dto/map-location-response.dto';
 import {
   ReorderTemplesDto,
   UpdateTempleStatusDto,
@@ -48,6 +53,8 @@ export class TempleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly contentReviews: ContentReviewService,
+    private readonly mapLocations: MapLocationService,
   ) {}
 
   async publicList(
@@ -61,7 +68,22 @@ export class TempleService {
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       include: includeTemple,
     });
-    return records.map((record) => this.toListDto(record));
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.TEMPLE,
+      records.map(({ id }) => id),
+    );
+    return records.map((record) =>
+      this.toListDto(
+        record,
+        this.mapLocations.getFromMap(
+          locations,
+          MapLocationSource.TEMPLE,
+          record.id,
+          '',
+          record.googleMapsUrl,
+        ),
+      ),
+    );
   }
 
   async publicDetail(id: string): Promise<TempleResponseDto> {
@@ -70,7 +92,15 @@ export class TempleService {
       include: includeTemple,
     });
     if (!record) throw this.notFound();
-    return this.toPublicDto(record);
+    return this.toPublicDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.TEMPLE,
+        record.id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async adminList(query: QueryTempleAdminDto) {
@@ -95,8 +125,23 @@ export class TempleService {
       }),
       this.prisma.temple.count({ where }),
     ]);
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.TEMPLE,
+      records.map(({ id }) => id),
+    );
     return paginate(
-      records.map((record) => this.toAdminDto(record)),
+      records.map((record) =>
+        this.toAdminDto(
+          record,
+          this.mapLocations.getFromMap(
+            locations,
+            MapLocationSource.TEMPLE,
+            record.id,
+            '',
+            record.googleMapsUrl,
+          ),
+        ),
+      ),
       query.page,
       query.limit,
       total,
@@ -104,7 +149,16 @@ export class TempleService {
   }
 
   async adminDetail(id: string): Promise<TempleAdminResponseDto> {
-    return this.toAdminDto(await this.findOrThrow(id));
+    const record = await this.findOrThrow(id);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.TEMPLE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async create(
@@ -128,6 +182,7 @@ export class TempleService {
           name: dto.name,
           type: TEMPLE_TYPE_TO_DB[dto.type],
           address: dto.address,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           openHours: dto.openHours,
           summary: dto.summary,
           description: dto.description,
@@ -149,6 +204,11 @@ export class TempleService {
         include: includeTemple,
       });
       await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.mapLocations.sync(
+        tx,
+        { source: MapLocationSource.TEMPLE, sourceId: id },
+        dto.googleMapsUrl,
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -160,7 +220,15 @@ export class TempleService {
       });
       return created;
     });
-    return this.toAdminDto(record);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.TEMPLE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async update(
@@ -190,6 +258,9 @@ export class TempleService {
             name: dto.name,
             type: TEMPLE_TYPE_TO_DB[dto.type],
             address: dto.address,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             openHours: dto.openHours,
             summary: dto.summary,
             description: dto.description,
@@ -238,6 +309,11 @@ export class TempleService {
           },
         );
         await this.claimMedia(tx, dto.mediaId, actorId, id);
+        await this.mapLocations.sync(
+          tx,
+          { source: MapLocationSource.TEMPLE, sourceId: id },
+          dto.googleMapsUrl ?? current.googleMapsUrl,
+        );
         await tx.auditLog.create({
           data: {
             actorId,
@@ -256,7 +332,15 @@ export class TempleService {
       },
     );
     await this.mediaService.purgeStorage([deletedMediaId]);
-    return this.toAdminDto(record);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.TEMPLE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async updateStatus(
@@ -288,7 +372,15 @@ export class TempleService {
         include: includeTemple,
       });
     });
-    return this.toAdminDto(record);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.TEMPLE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async reorder(
@@ -302,7 +394,7 @@ export class TempleService {
         'Danh sách sắp xếp chứa ID trùng',
       );
     }
-    return this.prisma.$transaction(async (tx) => {
+    const records = await this.prisma.$transaction(async (tx) => {
       const found = await tx.temple.count({ where: { id: { in: ids } } });
       if (found !== ids.length) throw this.notFound();
       for (const item of dto.items) {
@@ -330,14 +422,36 @@ export class TempleService {
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
         include: includeTemple,
       });
-      return records.map((record) => this.toAdminDto(record));
+      return records;
     });
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.TEMPLE,
+      records.map(({ id }) => id),
+    );
+    return records.map((record) =>
+      this.toAdminDto(
+        record,
+        this.mapLocations.getFromMap(
+          locations,
+          MapLocationSource.TEMPLE,
+          record.id,
+          '',
+          record.googleMapsUrl,
+        ),
+      ),
+    );
   }
 
   async remove(actorId: string, id: string): Promise<void> {
     const current = await this.findOrThrow(id);
-    const deletedMediaId = await this.prisma.$transaction(async (tx) => {
+    const deletedMediaIds = await this.prisma.$transaction(async (tx) => {
       await tx.temple.delete({ where: { id } });
+      const reviewMediaIds = await this.contentReviews.deleteForRecord(
+        tx,
+        ContentReviewTargetType.TEMPLE,
+        id,
+      );
+      await this.mapLocations.deleteForRecord(tx, MapLocationSource.TEMPLE, id);
       const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
         previousMediaId: current.mediaId,
         nextMediaId: null,
@@ -352,9 +466,9 @@ export class TempleService {
           resourceId: id,
         },
       });
-      return deletedMediaId;
+      return [deletedMediaId, ...reviewMediaIds];
     });
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
   }
 
   private async findOrThrow(id: string): Promise<TempleRecord> {
@@ -366,12 +480,17 @@ export class TempleService {
     return record;
   }
 
-  private toListDto(record: TempleRecord): TempleListItemResponseDto {
+  private toListDto(
+    record: TempleRecord,
+    mapLocation: MapLocationResponseDto | null,
+  ): TempleListItemResponseDto {
     return {
       id: record.id,
       name: record.name,
       type: TEMPLE_TYPE_FROM_DB[record.type],
       address: record.address,
+      googleMapsUrl: record.googleMapsUrl,
+      mapLocation,
       openHours: record.openHours,
       summary: record.summary,
       imageUrl: record.media?.originalUrl ?? null,
@@ -381,17 +500,23 @@ export class TempleService {
     };
   }
 
-  private toPublicDto(record: TempleRecord): TempleResponseDto {
+  private toPublicDto(
+    record: TempleRecord,
+    mapLocation: MapLocationResponseDto | null,
+  ): TempleResponseDto {
     return {
-      ...this.toListDto(record),
+      ...this.toListDto(record, mapLocation),
       description: this.readDescription(record.description),
       events: record.events.map(({ id, time, name }) => ({ id, time, name })),
     };
   }
 
-  private toAdminDto(record: TempleRecord): TempleAdminResponseDto {
+  private toAdminDto(
+    record: TempleRecord,
+    mapLocation: MapLocationResponseDto | null,
+  ): TempleAdminResponseDto {
     return {
-      ...this.toPublicDto(record),
+      ...this.toPublicDto(record, mapLocation),
       mediaId: record.mediaId,
       isActive: record.isActive,
       version: record.version,
@@ -489,11 +614,29 @@ export class TempleService {
       include: includeTemple,
     });
     if (!latest) return this.notFound();
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.TEMPLE,
+      [id],
+      tx,
+    );
     return new AppException(
       ErrorCode.TEMPLE_VERSION_CONFLICT,
       'Điểm du lịch đã được người khác cập nhật, vui lòng tải lại',
       HttpStatus.CONFLICT,
-      [{ latest: this.toAdminDto(latest) }],
+      [
+        {
+          latest: this.toAdminDto(
+            latest,
+            this.mapLocations.getFromMap(
+              locations,
+              MapLocationSource.TEMPLE,
+              id,
+              '',
+              latest.googleMapsUrl,
+            ),
+          ),
+        },
+      ],
     );
   }
 

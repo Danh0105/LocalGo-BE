@@ -30,7 +30,11 @@ export class ChatbotService {
   ) {
     this.config = configService.getOrThrow<ChatbotConfig>('chatbot');
     if (this.config.apiKey) {
-      this.client = new OpenAI({ apiKey: this.config.apiKey });
+      this.client = new OpenAI({
+        apiKey: this.config.apiKey,
+        timeout: 20_000,
+        maxRetries: 0,
+      });
     }
   }
 

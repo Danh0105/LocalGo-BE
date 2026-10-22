@@ -1,8 +1,11 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  ContentReviewTargetType,
   MediaResourceType,
+  MapLocationSource,
   Prisma,
   type HistoricalSite,
+  type HistoricalSiteImage,
   type Media,
   type User,
 } from '../../../../generated/prisma';
@@ -12,6 +15,9 @@ import { AppException } from '../../../common/exceptions/app.exception';
 import { slugify } from '../../../common/utils/slugify.util';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaService } from '../../media/services/media.service';
+import { ContentReviewService } from '../../content-reviews/services/content-review.service';
+import { MapLocationService } from '../../map-location/map-location.service';
+import type { MapLocationResponseDto } from '../../../common/dto/map-location-response.dto';
 import {
   ReorderHistoricalSitesDto,
   UpdateHistoricalSiteStatusDto,
@@ -36,12 +42,17 @@ import {
 
 type HistoricalSiteRecord = HistoricalSite & {
   media: Media | null;
+  galleryImages: Array<HistoricalSiteImage & { media: Media }>;
   createdBy: Pick<User, 'displayName'> | null;
   updatedBy: Pick<User, 'displayName'> | null;
 };
 
 const includeHistoricalSite = {
   media: true,
+  galleryImages: {
+    orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }],
+    include: { media: true },
+  },
   createdBy: { select: { displayName: true } },
   updatedBy: { select: { displayName: true } },
 };
@@ -51,6 +62,8 @@ export class HistoricalSiteService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly contentReviews: ContentReviewService,
+    private readonly mapLocations: MapLocationService,
   ) {}
 
   async publicList(
@@ -64,7 +77,22 @@ export class HistoricalSiteService {
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       include: includeHistoricalSite,
     });
-    return records.map((record) => this.toListDto(record));
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.HISTORICAL_SITE,
+      records.map(({ id }) => id),
+    );
+    return records.map((record) =>
+      this.toListDto(
+        record,
+        this.mapLocations.getFromMap(
+          locations,
+          MapLocationSource.HISTORICAL_SITE,
+          record.id,
+          '',
+          record.googleMapsUrl,
+        ),
+      ),
+    );
   }
 
   async publicDetail(id: string): Promise<HistoricalSiteResponseDto> {
@@ -73,7 +101,15 @@ export class HistoricalSiteService {
       include: includeHistoricalSite,
     });
     if (!record) throw this.notFound();
-    return this.toPublicDto(record);
+    return this.toPublicDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.HISTORICAL_SITE,
+        record.id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async adminList(query: QueryHistoricalSiteAdminDto) {
@@ -98,8 +134,23 @@ export class HistoricalSiteService {
       }),
       this.prisma.historicalSite.count({ where }),
     ]);
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.HISTORICAL_SITE,
+      records.map(({ id }) => id),
+    );
     return paginate(
-      records.map((record) => this.toAdminDto(record)),
+      records.map((record) =>
+        this.toAdminDto(
+          record,
+          this.mapLocations.getFromMap(
+            locations,
+            MapLocationSource.HISTORICAL_SITE,
+            record.id,
+            '',
+            record.googleMapsUrl,
+          ),
+        ),
+      ),
       query.page,
       query.limit,
       total,
@@ -107,7 +158,16 @@ export class HistoricalSiteService {
   }
 
   async adminDetail(id: string): Promise<HistoricalSiteAdminResponseDto> {
-    return this.toAdminDto(await this.findOrThrow(id));
+    const record = await this.findOrThrow(id);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.HISTORICAL_SITE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async create(
@@ -120,7 +180,15 @@ export class HistoricalSiteService {
       select: { id: true },
     });
     if (duplicate) throw this.slugExists();
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds = dto.galleryMediaIds ?? [];
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.HISTORICAL_SITE,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_HISTORICAL_SITE_MEDIA,
+    });
 
     const record = await this.prisma.$transaction(async (tx) => {
       const sortOrder = dto.sortOrder ?? (await this.nextSortOrder(tx));
@@ -130,6 +198,7 @@ export class HistoricalSiteService {
           name: dto.name,
           rank: HISTORICAL_SITE_RANK_TO_DB[dto.rank],
           address: dto.address,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           recognizedYear: dto.recognizedYear ?? null,
           summary: dto.summary,
           history: dto.history,
@@ -140,10 +209,31 @@ export class HistoricalSiteService {
           isActive: dto.isActive ?? true,
           createdById: actorId,
           updatedById: actorId,
+          ...(galleryMediaIds.length === 0
+            ? {}
+            : {
+                galleryImages: {
+                  create: galleryMediaIds.map((mediaId, index) => ({
+                    mediaId,
+                    sortOrder: index,
+                  })),
+                },
+              }),
         },
         include: includeHistoricalSite,
       });
-      await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.mediaService.claimContentImageSet(tx, {
+        mediaIds: [dto.mediaId, ...galleryMediaIds],
+        actorId,
+        resourceType: MediaResourceType.HISTORICAL_SITE,
+        resourceId: id,
+        errorCode: ErrorCode.INVALID_HISTORICAL_SITE_MEDIA,
+      });
+      await this.mapLocations.sync(
+        tx,
+        { source: MapLocationSource.HISTORICAL_SITE, sourceId: id },
+        dto.googleMapsUrl,
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -155,7 +245,15 @@ export class HistoricalSiteService {
       });
       return created;
     });
-    return this.toAdminDto(record);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.HISTORICAL_SITE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async update(
@@ -164,9 +262,19 @@ export class HistoricalSiteService {
     dto: UpdateHistoricalSiteDto,
   ): Promise<HistoricalSiteAdminResponseDto> {
     const current = await this.findOrThrow(id);
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds =
+      dto.galleryMediaIds ??
+      current.galleryImages.map((image) => image.mediaId);
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.HISTORICAL_SITE,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_HISTORICAL_SITE_MEDIA,
+    });
 
-    const { record, deletedMediaId } = await this.prisma.$transaction(
+    const { record, deletedMediaIds } = await this.prisma.$transaction(
       async (tx) => {
         const updated = await tx.historicalSite.updateMany({
           where: { id, version: dto.version },
@@ -174,6 +282,9 @@ export class HistoricalSiteService {
             name: dto.name,
             rank: HISTORICAL_SITE_RANK_TO_DB[dto.rank],
             address: dto.address,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             recognizedYear: dto.recognizedYear ?? null,
             summary: dto.summary,
             history: dto.history,
@@ -190,16 +301,43 @@ export class HistoricalSiteService {
         });
         if (updated.count !== 1) throw await this.versionConflict(tx, id);
 
-        const deletedMediaId = await this.mediaService.releaseSingularMedia(
+        if (dto.galleryMediaIds !== undefined) {
+          await tx.historicalSiteImage.deleteMany({
+            where: { historicalSiteId: id },
+          });
+          if (galleryMediaIds.length > 0)
+            await tx.historicalSiteImage.createMany({
+              data: galleryMediaIds.map((mediaId, index) => ({
+                historicalSiteId: id,
+                mediaId,
+                sortOrder: index,
+              })),
+            });
+        }
+        await this.mediaService.claimContentImageSet(tx, {
+          mediaIds: [dto.mediaId, ...galleryMediaIds],
+          actorId,
+          resourceType: MediaResourceType.HISTORICAL_SITE,
+          resourceId: id,
+          errorCode: ErrorCode.INVALID_HISTORICAL_SITE_MEDIA,
+        });
+        await this.mapLocations.sync(
+          tx,
+          { source: MapLocationSource.HISTORICAL_SITE, sourceId: id },
+          dto.googleMapsUrl ?? current.googleMapsUrl,
+        );
+        const deletedMediaIds = await this.mediaService.releaseContentImageSet(
           tx,
           {
-            previousMediaId: current.mediaId,
-            nextMediaId: dto.mediaId ?? null,
+            previousMediaIds: [
+              current.mediaId,
+              ...current.galleryImages.map((image) => image.mediaId),
+            ],
+            nextMediaIds: [dto.mediaId, ...galleryMediaIds],
             resourceType: MediaResourceType.HISTORICAL_SITE,
             resourceId: id,
           },
         );
-        await this.claimMedia(tx, dto.mediaId, actorId, id);
         await tx.auditLog.create({
           data: {
             actorId,
@@ -214,11 +352,19 @@ export class HistoricalSiteService {
           where: { id },
           include: includeHistoricalSite,
         });
-        return { record, deletedMediaId };
+        return { record, deletedMediaIds };
       },
     );
-    await this.mediaService.purgeStorage([deletedMediaId]);
-    return this.toAdminDto(record);
+    await this.mediaService.purgeStorage(deletedMediaIds);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.HISTORICAL_SITE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async updateStatus(
@@ -252,7 +398,15 @@ export class HistoricalSiteService {
         include: includeHistoricalSite,
       });
     });
-    return this.toAdminDto(record);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.HISTORICAL_SITE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async reorder(
@@ -266,7 +420,7 @@ export class HistoricalSiteService {
         'Danh sách sắp xếp chứa ID trùng',
       );
     }
-    return this.prisma.$transaction(async (tx) => {
+    const records = await this.prisma.$transaction(async (tx) => {
       const found = await tx.historicalSite.count({
         where: { id: { in: ids } },
       });
@@ -296,20 +450,52 @@ export class HistoricalSiteService {
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
         include: includeHistoricalSite,
       });
-      return records.map((record) => this.toAdminDto(record));
+      return records;
     });
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.HISTORICAL_SITE,
+      records.map(({ id }) => id),
+    );
+    return records.map((record) =>
+      this.toAdminDto(
+        record,
+        this.mapLocations.getFromMap(
+          locations,
+          MapLocationSource.HISTORICAL_SITE,
+          record.id,
+          '',
+          record.googleMapsUrl,
+        ),
+      ),
+    );
   }
 
   async remove(actorId: string, id: string): Promise<void> {
     const current = await this.findOrThrow(id);
-    const deletedMediaId = await this.prisma.$transaction(async (tx) => {
+    const deletedMediaIds = await this.prisma.$transaction(async (tx) => {
       await tx.historicalSite.delete({ where: { id } });
-      const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
-        previousMediaId: current.mediaId,
-        nextMediaId: null,
-        resourceType: MediaResourceType.HISTORICAL_SITE,
-        resourceId: id,
-      });
+      const reviewMediaIds = await this.contentReviews.deleteForRecord(
+        tx,
+        ContentReviewTargetType.HISTORICAL_SITE,
+        id,
+      );
+      await this.mapLocations.deleteForRecord(
+        tx,
+        MapLocationSource.HISTORICAL_SITE,
+        id,
+      );
+      const deletedMediaIds = await this.mediaService.releaseContentImageSet(
+        tx,
+        {
+          previousMediaIds: [
+            current.mediaId,
+            ...current.galleryImages.map((image) => image.mediaId),
+          ],
+          nextMediaIds: [],
+          resourceType: MediaResourceType.HISTORICAL_SITE,
+          resourceId: id,
+        },
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -318,9 +504,9 @@ export class HistoricalSiteService {
           resourceId: id,
         },
       });
-      return deletedMediaId;
+      return [...deletedMediaIds, ...reviewMediaIds];
     });
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
   }
 
   private async findOrThrow(id: string): Promise<HistoricalSiteRecord> {
@@ -334,12 +520,15 @@ export class HistoricalSiteService {
 
   private toListDto(
     record: HistoricalSiteRecord,
+    mapLocation: MapLocationResponseDto | null,
   ): HistoricalSiteListItemResponseDto {
     return {
       id: record.id,
       name: record.name,
       rank: HISTORICAL_SITE_RANK_FROM_DB[record.rank],
       address: record.address,
+      googleMapsUrl: record.googleMapsUrl,
+      mapLocation,
       recognizedYear: record.recognizedYear,
       summary: record.summary,
       imageUrl: record.media?.originalUrl ?? null,
@@ -349,20 +538,31 @@ export class HistoricalSiteService {
     };
   }
 
-  private toPublicDto(record: HistoricalSiteRecord): HistoricalSiteResponseDto {
+  private toPublicDto(
+    record: HistoricalSiteRecord,
+    mapLocation: MapLocationResponseDto | null,
+  ): HistoricalSiteResponseDto {
     return {
-      ...this.toListDto(record),
+      ...this.toListDto(record, mapLocation),
       history: this.readStringArray(record.history),
       highlights: this.readStringArray(record.highlights),
+      galleryImages: record.galleryImages.map((image) => ({
+        mediaId: image.mediaId,
+        imageUrl: image.media.originalUrl,
+        thumbnailUrl: image.media.thumbnailUrl,
+        sortOrder: image.sortOrder,
+      })),
     };
   }
 
   private toAdminDto(
     record: HistoricalSiteRecord,
+    mapLocation: MapLocationResponseDto | null,
   ): HistoricalSiteAdminResponseDto {
     return {
-      ...this.toPublicDto(record),
+      ...this.toPublicDto(record, mapLocation),
       mediaId: record.mediaId,
+      galleryMediaIds: record.galleryImages.map((image) => image.mediaId),
       isActive: record.isActive,
       version: record.version,
       createdAt: record.createdAt,
@@ -455,11 +655,29 @@ export class HistoricalSiteService {
       include: includeHistoricalSite,
     });
     if (!latest) return this.notFound();
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.HISTORICAL_SITE,
+      [id],
+      tx,
+    );
     return new AppException(
       ErrorCode.HISTORICAL_SITE_VERSION_CONFLICT,
       'Di tích đã được người khác cập nhật, vui lòng tải lại',
       HttpStatus.CONFLICT,
-      [{ latest: this.toAdminDto(latest) }],
+      [
+        {
+          latest: this.toAdminDto(
+            latest,
+            this.mapLocations.getFromMap(
+              locations,
+              MapLocationSource.HISTORICAL_SITE,
+              id,
+              '',
+              latest.googleMapsUrl,
+            ),
+          ),
+        },
+      ],
     );
   }
 

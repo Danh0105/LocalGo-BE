@@ -1,6 +1,7 @@
 export interface AboutMediaRef {
   mediaId: string | null;
   imageAlt: string;
+  imageUrl?: string;
 }
 
 export interface AboutStatisticSnapshot {

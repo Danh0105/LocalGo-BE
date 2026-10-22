@@ -5,9 +5,8 @@ import { Prisma } from '../../../../../generated/prisma';
  * Recomputes TradePost.averageRating/reviewCount from the actual set of
  * PUBLISHED, non-deleted TradeReview rows for that post — never a naive
  * increment/decrement. Must always be called from inside the same
- * transaction as the review mutation that triggered it (create-doesn't-
- * need-it since new reviews start PENDING; publish/hide/soft-delete/edit-
- * that-reverts-status all do).
+ * transaction as the review mutation that triggered it (create — new
+ * reviews start PUBLISHED — publish/hide/soft-delete and rating edits).
  *
  * Concurrency safety: under READ COMMITTED, when an UPDATE blocks on a
  * row lock held by another transaction, PostgreSQL's EvalPlanQual re-check
@@ -16,11 +15,15 @@ import { Prisma } from '../../../../../generated/prisma';
  * tables (TradeReview) in the same statement. Those subqueries can still
  * see the pre-wait snapshot and miss reviews committed by the transaction
  * we were blocked on, causing a lost update. To avoid this we first take
- * an explicit `SELECT ... FOR UPDATE` on the TradePost row (this blocks
- * until any concurrent recompute commits), then run the aggregate UPDATE
- * as a separate statement — which, under READ COMMITTED, gets a fresh
- * snapshot at its own start and is guaranteed to see all previously
+ * an explicit `SELECT ... FOR NO KEY UPDATE` on the TradePost row (this
+ * blocks until any concurrent recompute commits), then run the aggregate
+ * UPDATE as a separate statement — which, under READ COMMITTED, gets a
+ * fresh snapshot at its own start and is guaranteed to see all previously
  * committed review changes.
+ *
+ * NO KEY UPDATE (not FOR UPDATE): inserting a TradeReview holds a FOR KEY
+ * SHARE lock on its TradePost via the foreign key, which FOR UPDATE
+ * conflicts with — two concurrent creates on one post would deadlock.
  */
 @Injectable()
 export class TradeRatingService {
@@ -29,7 +32,7 @@ export class TradeRatingService {
     tradePostId: string,
   ): Promise<void> {
     await tx.$executeRaw`
-      SELECT id FROM "TradePost" WHERE id = ${tradePostId} FOR UPDATE`;
+      SELECT id FROM "TradePost" WHERE id = ${tradePostId} FOR NO KEY UPDATE`;
 
     await tx.$executeRaw`
       UPDATE "TradePost" SET

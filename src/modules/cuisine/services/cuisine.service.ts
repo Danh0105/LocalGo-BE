@@ -1,7 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  ContentReviewTargetType,
   MediaResourceType,
+  MapLocationSource,
   Prisma,
+  type CuisineItemImage,
   type CuisineItem,
   type Media,
   type User,
@@ -12,6 +15,11 @@ import { AppException } from '../../../common/exceptions/app.exception';
 import { slugify } from '../../../common/utils/slugify.util';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaService } from '../../media/services/media.service';
+import { ContentReviewService } from '../../content-reviews/services/content-review.service';
+import {
+  MapLocationService,
+  type MapLocationLookup,
+} from '../../map-location/map-location.service';
 import {
   ReorderCuisineItemsDto,
   UpdateCuisineItemStatusDto,
@@ -35,18 +43,29 @@ import {
   CUISINE_CATEGORY_TO_DB,
 } from '../cuisine.constants';
 import {
+  parseCuisineMenu,
+  parseCuisineReviews,
+  type CuisineMenuItem,
+  type CuisineReview,
+} from '../utils/cuisine-details.util';
+import {
   parseSuggestedPlaceDetails,
   type CuisineSuggestedPlace,
 } from '../utils/suggested-place.util';
 
 type CuisineItemRecord = CuisineItem & {
   media: Media | null;
+  galleryImages: Array<CuisineItemImage & { media: Media }>;
   createdBy: Pick<User, 'displayName'> | null;
   updatedBy: Pick<User, 'displayName'> | null;
 };
 
 const includeCuisineItem = {
   media: true,
+  galleryImages: {
+    orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }],
+    include: { media: true },
+  },
   createdBy: { select: { displayName: true } },
   updatedBy: { select: { displayName: true } },
 };
@@ -56,6 +75,8 @@ export class CuisineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly contentReviews: ContentReviewService,
+    private readonly mapLocations: MapLocationService,
   ) {}
 
   async publicList(
@@ -71,7 +92,11 @@ export class CuisineService {
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       include: includeCuisineItem,
     });
-    return records.map((record) => this.toListDto(record));
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.CUISINE,
+      records.map(({ id }) => id),
+    );
+    return records.map((record) => this.toListDto(record, locations));
   }
 
   async publicDetail(id: string): Promise<CuisineResponseDto> {
@@ -80,7 +105,11 @@ export class CuisineService {
       include: includeCuisineItem,
     });
     if (!record) throw this.notFound();
-    return this.toPublicDto(record);
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.CUISINE,
+      [record.id],
+    );
+    return this.toPublicDto(record, locations);
   }
 
   async adminList(query: QueryCuisineAdminDto) {
@@ -102,8 +131,12 @@ export class CuisineService {
       }),
       this.prisma.cuisineItem.count({ where }),
     ]);
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.CUISINE,
+      records.map(({ id }) => id),
+    );
     return paginate(
-      records.map((record) => this.toAdminDto(record)),
+      records.map((record) => this.toAdminDto(record, locations)),
       query.page,
       query.limit,
       total,
@@ -111,7 +144,12 @@ export class CuisineService {
   }
 
   async adminDetail(id: string): Promise<CuisineAdminResponseDto> {
-    return this.toAdminDto(await this.findOrThrow(id));
+    const record = await this.findOrThrow(id);
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.CUISINE,
+      [id],
+    );
+    return this.toAdminDto(record, locations);
   }
 
   async create(
@@ -124,8 +162,12 @@ export class CuisineService {
       select: { id: true },
     });
     if (duplicate) throw this.slugExists();
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds = dto.galleryMediaIds ?? [];
+    this.assertDistinctCuisineMedia(dto.mediaId, galleryMediaIds);
+    await this.validateMediaSet([dto.mediaId, ...galleryMediaIds], actorId, id);
     const places = this.resolveSuggestedPlaces(dto, id);
+    const menu = this.resolveMenu(dto.menu);
+    const reviews = this.resolveReviews(dto.reviews);
     this.assertSuggestedPlacesForActive(dto.isActive ?? true, places);
 
     const record = await this.prisma.$transaction(async (tx) => {
@@ -137,21 +179,46 @@ export class CuisineService {
           category: CUISINE_CATEGORY_TO_DB[dto.category],
           priceRange: dto.priceRange,
           bestTime: dto.bestTime,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           suggestedPlaces: places as unknown as Prisma.InputJsonValue,
           summary: dto.summary,
           description: dto.description,
           highlights: dto.highlights,
           tip: dto.tip,
+          contactPhone: dto.contactPhone ?? '',
+          menu: menu as unknown as Prisma.InputJsonValue,
+          reviews: reviews as unknown as Prisma.InputJsonValue,
           mediaId: dto.mediaId ?? null,
           imageAlt: dto.imageAlt,
           sortOrder,
           isActive: dto.isActive ?? true,
           createdById: actorId,
           updatedById: actorId,
+          ...(galleryMediaIds.length === 0
+            ? {}
+            : {
+                galleryImages: {
+                  create: galleryMediaIds.map((mediaId, index) => ({
+                    mediaId,
+                    sortOrder: index,
+                  })),
+                },
+              }),
         },
         include: includeCuisineItem,
       });
-      await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.claimMediaSet(
+        tx,
+        [dto.mediaId, ...galleryMediaIds],
+        actorId,
+        id,
+      );
+      await this.mapLocations.syncCuisine(
+        tx,
+        id,
+        dto.googleMapsUrl ?? '',
+        places,
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -163,7 +230,11 @@ export class CuisineService {
       });
       return created;
     });
-    return this.toAdminDto(record);
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.CUISINE,
+      [id],
+    );
+    return this.toAdminDto(record, locations);
   }
 
   async update(
@@ -172,14 +243,18 @@ export class CuisineService {
     dto: UpdateCuisineItemDto,
   ): Promise<CuisineAdminResponseDto> {
     const current = await this.findOrThrow(id);
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds =
+      dto.galleryMediaIds ??
+      current.galleryImages.map((image) => image.mediaId);
+    this.assertDistinctCuisineMedia(dto.mediaId, galleryMediaIds);
+    await this.validateMediaSet([dto.mediaId, ...galleryMediaIds], actorId, id);
     const places = this.resolveSuggestedPlaces(dto, id);
     this.assertSuggestedPlacesForActive(
       dto.isActive ?? current.isActive,
       places,
     );
 
-    const { record, deletedMediaId } = await this.prisma.$transaction(
+    const { record, deletedMediaIds } = await this.prisma.$transaction(
       async (tx) => {
         const updated = await tx.cuisineItem.updateMany({
           where: { id, version: dto.version },
@@ -188,11 +263,31 @@ export class CuisineService {
             category: CUISINE_CATEGORY_TO_DB[dto.category],
             priceRange: dto.priceRange,
             bestTime: dto.bestTime,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             suggestedPlaces: places as unknown as Prisma.InputJsonValue,
             summary: dto.summary,
             description: dto.description,
             highlights: dto.highlights,
             tip: dto.tip,
+            ...(dto.contactPhone === undefined
+              ? {}
+              : { contactPhone: dto.contactPhone }),
+            ...(dto.menu === undefined
+              ? {}
+              : {
+                  menu: this.resolveMenu(
+                    dto.menu,
+                  ) as unknown as Prisma.InputJsonValue,
+                }),
+            ...(dto.reviews === undefined
+              ? {}
+              : {
+                  reviews: this.resolveReviews(
+                    dto.reviews,
+                  ) as unknown as Prisma.InputJsonValue,
+                }),
             mediaId: dto.mediaId ?? null,
             imageAlt: dto.imageAlt,
             ...(dto.sortOrder === undefined
@@ -205,16 +300,68 @@ export class CuisineService {
         });
         if (updated.count !== 1) throw await this.versionConflict(tx, id);
 
-        const deletedMediaId = await this.mediaService.releaseSingularMedia(
+        if (dto.galleryMediaIds !== undefined) {
+          await tx.cuisineItemImage.deleteMany({
+            where: { cuisineItemId: id },
+          });
+          if (galleryMediaIds.length > 0) {
+            await tx.cuisineItemImage.createMany({
+              data: galleryMediaIds.map((mediaId, index) => ({
+                cuisineItemId: id,
+                mediaId,
+                sortOrder: index,
+              })),
+            });
+          }
+        }
+
+        await this.claimMediaSet(
           tx,
-          {
-            previousMediaId: current.mediaId,
-            nextMediaId: dto.mediaId ?? null,
-            resourceType: MediaResourceType.CUISINE,
-            resourceId: id,
-          },
+          [dto.mediaId, ...galleryMediaIds],
+          actorId,
+          id,
         );
-        await this.claimMedia(tx, dto.mediaId, actorId, id);
+        const previousMediaIds = [
+          current.mediaId,
+          ...current.galleryImages.map((image) => image.mediaId),
+        ].filter((mediaId): mediaId is string => !!mediaId);
+        const nextMediaIds = new Set(
+          [dto.mediaId, ...galleryMediaIds].filter(
+            (mediaId): mediaId is string => !!mediaId,
+          ),
+        );
+        const removedMediaIds = previousMediaIds.filter(
+          (mediaId) => !nextMediaIds.has(mediaId),
+        );
+        const releasable =
+          removedMediaIds.length === 0
+            ? []
+            : await tx.media.findMany({
+                where: {
+                  id: { in: removedMediaIds },
+                  resourceType: MediaResourceType.CUISINE,
+                  resourceId: id,
+                  deletedAt: null,
+                },
+                select: { id: true },
+              });
+        const deletedMediaIds = releasable.map(({ id: mediaId }) => mediaId);
+        if (deletedMediaIds.length > 0) {
+          await tx.media.updateMany({
+            where: { id: { in: deletedMediaIds } },
+            data: {
+              resourceType: null,
+              resourceId: null,
+              deletedAt: new Date(),
+            },
+          });
+        }
+        await this.mapLocations.syncCuisine(
+          tx,
+          id,
+          dto.googleMapsUrl ?? current.googleMapsUrl,
+          places,
+        );
         await tx.auditLog.create({
           data: {
             actorId,
@@ -229,11 +376,15 @@ export class CuisineService {
           where: { id },
           include: includeCuisineItem,
         });
-        return { record, deletedMediaId };
+        return { record, deletedMediaIds };
       },
     );
-    await this.mediaService.purgeStorage([deletedMediaId]);
-    return this.toAdminDto(record);
+    await this.mediaService.purgeStorage(deletedMediaIds);
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.CUISINE,
+      [id],
+    );
+    return this.toAdminDto(record, locations);
   }
 
   async updateStatus(
@@ -272,7 +423,11 @@ export class CuisineService {
         include: includeCuisineItem,
       });
     });
-    return this.toAdminDto(record);
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.CUISINE,
+      [id],
+    );
+    return this.toAdminDto(record, locations);
   }
 
   async reorder(
@@ -286,7 +441,7 @@ export class CuisineService {
         'Danh sách sắp xếp chứa ID trùng',
       );
     }
-    return this.prisma.$transaction(async (tx) => {
+    const records = await this.prisma.$transaction(async (tx) => {
       const found = await tx.cuisineItem.count({
         where: { id: { in: ids } },
       });
@@ -316,20 +471,53 @@ export class CuisineService {
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
         include: includeCuisineItem,
       });
-      return records.map((record) => this.toAdminDto(record));
+      return records;
     });
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.CUISINE,
+      records.map(({ id }) => id),
+    );
+    return records.map((record) => this.toAdminDto(record, locations));
   }
 
   async remove(actorId: string, id: string): Promise<void> {
     const current = await this.findOrThrow(id);
-    const deletedMediaId = await this.prisma.$transaction(async (tx) => {
-      await tx.cuisineItem.delete({ where: { id } });
-      const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
-        previousMediaId: current.mediaId,
-        nextMediaId: null,
-        resourceType: MediaResourceType.CUISINE,
-        resourceId: id,
+    const deletedMediaIds = await this.prisma.$transaction(async (tx) => {
+      const candidateIds = [
+        current.mediaId,
+        ...current.galleryImages.map((image) => image.mediaId),
+      ].filter((mediaId): mediaId is string => !!mediaId);
+      const claimedMedia = await tx.media.findMany({
+        where: {
+          id: { in: candidateIds },
+          resourceType: MediaResourceType.CUISINE,
+          resourceId: id,
+          deletedAt: null,
+        },
+        select: { id: true },
       });
+      await tx.cuisineItem.delete({ where: { id } });
+      const reviewMediaIds = await this.contentReviews.deleteForRecord(
+        tx,
+        ContentReviewTargetType.CUISINE,
+        id,
+      );
+      await this.mapLocations.deleteForRecord(
+        tx,
+        MapLocationSource.CUISINE,
+        id,
+      );
+      const claimedIds = claimedMedia.map(({ id: mediaId }) => mediaId);
+      if (claimedIds.length > 0) {
+        await tx.media.updateMany({
+          where: { id: { in: claimedIds } },
+          data: {
+            resourceType: null,
+            resourceId: null,
+            deletedAt: new Date(),
+          },
+        });
+      }
       await tx.auditLog.create({
         data: {
           actorId,
@@ -338,9 +526,9 @@ export class CuisineService {
           resourceId: id,
         },
       });
-      return deletedMediaId;
+      return [...claimedIds, ...reviewMediaIds];
     });
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
   }
 
   private async findOrThrow(id: string): Promise<CuisineItemRecord> {
@@ -352,19 +540,52 @@ export class CuisineService {
     return record;
   }
 
-  private toListDto(record: CuisineItemRecord): CuisineListItemResponseDto {
+  private toListDto(
+    record: CuisineItemRecord,
+    locations: Map<string, MapLocationLookup>,
+  ): CuisineListItemResponseDto {
     const places = parseSuggestedPlaceDetails(
       record.suggestedPlaces,
       record.id,
     );
+    const reviews = parseCuisineReviews(record.reviews, record.id);
+    const averageRating =
+      reviews.length === 0
+        ? 0
+        : Number(
+            (
+              reviews.reduce((total, review) => total + review.rating, 0) /
+              reviews.length
+            ).toFixed(1),
+          );
     return {
       id: record.id,
       name: record.name,
       category: CUISINE_CATEGORY_FROM_DB[record.category],
       priceRange: record.priceRange,
       bestTime: record.bestTime,
+      googleMapsUrl: record.googleMapsUrl,
+      mapLocation: this.mapLocations.getFromMap(
+        locations,
+        MapLocationSource.CUISINE,
+        record.id,
+        '',
+        record.googleMapsUrl,
+      ),
       suggestedPlaces: places.map((place) => place.name),
+      suggestedPlaceDetails: places.map((place) => ({
+        ...place,
+        mapLocation: this.mapLocations.getFromMap(
+          locations,
+          MapLocationSource.CUISINE,
+          record.id,
+          place.id,
+          place.googleMapsUrl,
+        ),
+      })),
       summary: record.summary,
+      averageRating,
+      reviewCount: reviews.length,
       imageUrl: record.media?.originalUrl ?? null,
       imageAlt: record.imageAlt,
       sortOrder: record.sortOrder,
@@ -372,23 +593,35 @@ export class CuisineService {
     };
   }
 
-  private toPublicDto(record: CuisineItemRecord): CuisineResponseDto {
+  private toPublicDto(
+    record: CuisineItemRecord,
+    locations: Map<string, MapLocationLookup>,
+  ): CuisineResponseDto {
     return {
-      ...this.toListDto(record),
+      ...this.toListDto(record, locations),
       description: this.readStringArray(record.description),
       highlights: this.readStringArray(record.highlights),
       tip: record.tip,
-      suggestedPlaceDetails: parseSuggestedPlaceDetails(
-        record.suggestedPlaces,
-        record.id,
-      ),
+      contactPhone: record.contactPhone,
+      menu: parseCuisineMenu(record.menu, record.id),
+      reviews: parseCuisineReviews(record.reviews, record.id),
+      galleryImages: record.galleryImages.map((image) => ({
+        mediaId: image.mediaId,
+        imageUrl: image.media.originalUrl,
+        thumbnailUrl: image.media.thumbnailUrl,
+        sortOrder: image.sortOrder,
+      })),
     };
   }
 
-  private toAdminDto(record: CuisineItemRecord): CuisineAdminResponseDto {
+  private toAdminDto(
+    record: CuisineItemRecord,
+    locations: Map<string, MapLocationLookup>,
+  ): CuisineAdminResponseDto {
     return {
-      ...this.toPublicDto(record),
+      ...this.toPublicDto(record, locations),
       mediaId: record.mediaId,
+      galleryMediaIds: record.galleryImages.map((image) => image.mediaId),
       isActive: record.isActive,
       version: record.version,
       createdAt: record.createdAt,
@@ -445,40 +678,95 @@ export class CuisineService {
     }
   }
 
-  private async validateMedia(
+  private resolveMenu(items: CuisineContentDto['menu']): CuisineMenuItem[] {
+    const menu = (items ?? []).map((item) => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      description: item.description ?? '',
+    }));
+    this.assertUniqueContentIds(
+      menu.map((item) => item.id),
+      'Menu chứa ID món trùng',
+    );
+    return menu;
+  }
+
+  private resolveReviews(items: CuisineContentDto['reviews']): CuisineReview[] {
+    const reviews = (items ?? []).map((item) => ({
+      id: item.id,
+      reviewerName: item.reviewerName,
+      rating: item.rating,
+      feedback: item.feedback,
+      adminResponse: item.adminResponse ?? '',
+    }));
+    this.assertUniqueContentIds(
+      reviews.map((review) => review.id),
+      'Danh sách đánh giá chứa ID trùng',
+    );
+    return reviews;
+  }
+
+  private assertUniqueContentIds(ids: string[], message: string): void {
+    if (new Set(ids).size !== ids.length) {
+      throw new AppException(ErrorCode.VALIDATION_ERROR, message);
+    }
+  }
+
+  private assertDistinctCuisineMedia(
     mediaId: string | null | undefined,
+    galleryMediaIds: string[],
+  ): void {
+    if (mediaId && galleryMediaIds.includes(mediaId)) {
+      throw new AppException(
+        ErrorCode.VALIDATION_ERROR,
+        'Ảnh chính không được trùng với ảnh phụ',
+      );
+    }
+  }
+
+  private async validateMediaSet(
+    mediaIds: Array<string | null | undefined>,
     actorId: string,
     cuisineItemId: string,
   ): Promise<void> {
-    if (!mediaId) return;
-    const media = await this.prisma.media.findFirst({
-      where: { id: mediaId, deletedAt: null },
+    const ids = [...new Set(mediaIds.filter((id): id is string => !!id))];
+    if (ids.length === 0) return;
+    const mediaRecords = await this.prisma.media.findMany({
+      where: { id: { in: ids }, deletedAt: null },
     });
-    const validImage = media?.mimeType.startsWith('image/');
-    const usable =
-      media &&
-      ((media.resourceType === null && media.ownerId === actorId) ||
-        (media.resourceType === MediaResourceType.CUISINE &&
-          (media.resourceId === cuisineItemId || media.resourceId === null)));
-    if (!validImage || !usable) {
+    const validIds = new Set(
+      mediaRecords
+        .filter(
+          (media) =>
+            media.mimeType.startsWith('image/') &&
+            ((media.resourceType === null && media.ownerId === actorId) ||
+              (media.resourceType === MediaResourceType.CUISINE &&
+                (media.resourceId === cuisineItemId ||
+                  media.resourceId === null))),
+        )
+        .map((media) => media.id),
+    );
+    if (validIds.size !== ids.length) {
       throw new AppException(
         ErrorCode.INVALID_CUISINE_ITEM_MEDIA,
-        'Ảnh không tồn tại hoặc không được phép sử dụng',
+        'Một hoặc nhiều ảnh không tồn tại hoặc không được phép sử dụng',
         HttpStatus.BAD_REQUEST,
       );
     }
   }
 
-  private async claimMedia(
+  private async claimMediaSet(
     tx: Prisma.TransactionClient,
-    mediaId: string | null | undefined,
+    mediaIds: Array<string | null | undefined>,
     actorId: string,
     cuisineItemId: string,
   ): Promise<void> {
-    if (!mediaId) return;
-    const claimed = await tx.media.updateMany({
+    const ids = [...new Set(mediaIds.filter((id): id is string => !!id))];
+    if (ids.length === 0) return;
+    await tx.media.updateMany({
       where: {
-        id: mediaId,
+        id: { in: ids },
         ownerId: actorId,
         resourceType: null,
         deletedAt: null,
@@ -488,21 +776,20 @@ export class CuisineService {
         resourceId: cuisineItemId,
       },
     });
-    if (claimed.count === 0) {
-      const existing = await tx.media.findFirst({
-        where: {
-          id: mediaId,
-          resourceType: MediaResourceType.CUISINE,
-          OR: [{ resourceId: cuisineItemId }, { resourceId: null }],
-          deletedAt: null,
-        },
-      });
-      if (!existing)
-        throw new AppException(
-          ErrorCode.INVALID_CUISINE_ITEM_MEDIA,
-          'Ảnh đã được nội dung khác sử dụng',
-          HttpStatus.CONFLICT,
-        );
+    const usableCount = await tx.media.count({
+      where: {
+        id: { in: ids },
+        resourceType: MediaResourceType.CUISINE,
+        OR: [{ resourceId: cuisineItemId }, { resourceId: null }],
+        deletedAt: null,
+      },
+    });
+    if (usableCount !== ids.length) {
+      throw new AppException(
+        ErrorCode.INVALID_CUISINE_ITEM_MEDIA,
+        'Một hoặc nhiều ảnh đã được nội dung khác sử dụng',
+        HttpStatus.CONFLICT,
+      );
     }
   }
 
@@ -522,11 +809,16 @@ export class CuisineService {
       include: includeCuisineItem,
     });
     if (!latest) return this.notFound();
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.CUISINE,
+      [id],
+      tx,
+    );
     return new AppException(
       ErrorCode.CUISINE_ITEM_VERSION_CONFLICT,
       'Món ăn đã được người khác cập nhật, vui lòng tải lại',
       HttpStatus.CONFLICT,
-      [{ latest: this.toAdminDto(latest) }],
+      [{ latest: this.toAdminDto(latest, locations) }],
     );
   }
 

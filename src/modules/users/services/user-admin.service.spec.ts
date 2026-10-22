@@ -11,7 +11,9 @@ const baseUser: User = {
   displayName: 'Target',
   avatarUrl: null,
   passwordHash: null,
+  credentialVersion: 0,
   role: UserRole.USER,
+  businessType: null,
   status: UserStatus.ACTIVE,
   lastLoginAt: null,
   createdAt: new Date(),
@@ -24,10 +26,106 @@ describe('UserAdminService', () => {
     findAdminList: jest.fn(),
     findById: jest.fn(),
     updateStatusAndRevokeSessions: jest.fn(),
+    emailExists: jest.fn(),
+    phoneExists: jest.fn(),
+    createUserWithAudit: jest.fn(),
+    getDeletionCounts: jest.fn(),
+    deleteAccountAndRelatedData: jest.fn(),
+    hardDeleteMedia: jest.fn(),
   };
-  const service = new UserAdminService(repository as never);
+  const mediaService = { purgeStorage: jest.fn() };
+  const service = new UserAdminService(
+    repository as never,
+    mediaService as never,
+  );
 
   beforeEach(() => jest.clearAllMocks());
+
+  it('creates an active non-admin account with the requested role and a hashed password', async () => {
+    let capturedPasswordHash = '';
+    repository.emailExists.mockResolvedValue(false);
+    repository.phoneExists.mockResolvedValue(false);
+    repository.createUserWithAudit.mockImplementation(
+      (input: { passwordHash: string; role: UserRole }) => {
+        capturedPasswordHash = input.passwordHash;
+        return Promise.resolve({
+          ...baseUser,
+          id: 'business-id',
+          email: 'business@example.com',
+          phone: '0901234567',
+          displayName: 'Business Name',
+          passwordHash: input.passwordHash,
+          role: input.role,
+        });
+      },
+    );
+    const actor: AuthenticatedUser = {
+      id: 'admin',
+      role: UserRole.ADMIN,
+      email: null,
+      displayName: 'Admin',
+    };
+
+    const result = await service.createUser(actor, {
+      displayName: ' Business Name ',
+      email: 'BUSINESS@EXAMPLE.COM',
+      phone: '0901234567',
+      password: 'business-password-123',
+      role: UserRole.MODERATOR,
+    });
+
+    expect(result.role).toBe(UserRole.MODERATOR);
+    expect(repository.createUserWithAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: actor.id,
+        displayName: 'Business Name',
+        email: 'business@example.com',
+        phone: '0901234567',
+        role: UserRole.MODERATOR,
+      }),
+    );
+    expect(capturedPasswordHash).toMatch(/^\$argon2/);
+    expect(capturedPasswordHash).not.toContain('business-password-123');
+  });
+
+  it('rejects a duplicate email before creating an account', async () => {
+    repository.emailExists.mockResolvedValue(true);
+    const actor: AuthenticatedUser = {
+      id: 'admin',
+      role: UserRole.ADMIN,
+      email: null,
+      displayName: 'Admin',
+    };
+
+    await expect(
+      service.createUser(actor, {
+        displayName: 'Business Name',
+        email: 'business@example.com',
+        password: 'business-password-123',
+        role: UserRole.BUSINESS,
+      }),
+    ).rejects.toMatchObject({ code: ErrorCode.EMAIL_ALREADY_EXISTS });
+    expect(repository.createUserWithAudit).not.toHaveBeenCalled();
+  });
+
+  it('does not allow an admin account to be created', async () => {
+    const actor: AuthenticatedUser = {
+      id: 'admin',
+      role: UserRole.ADMIN,
+      email: null,
+      displayName: 'Admin',
+    };
+
+    await expect(
+      service.createUser(actor, {
+        displayName: 'Another Admin',
+        email: 'another-admin@example.com',
+        password: 'admin-password-123',
+        role: UserRole.ADMIN,
+      }),
+    ).rejects.toMatchObject({ code: ErrorCode.INSUFFICIENT_PERMISSION });
+    expect(repository.createUserWithAudit).not.toHaveBeenCalled();
+  });
 
   it('passes pagination, filters and search to the repository', async () => {
     repository.findAdminList.mockResolvedValue({ items: [baseUser], total: 1 });
@@ -91,5 +189,81 @@ describe('UserAdminService', () => {
       status: UserStatus.BLOCKED,
     });
     expect(result.status).toBe(UserStatus.BLOCKED);
+  });
+
+  it('returns the exact deletion impact for an admin', async () => {
+    const actor: AuthenticatedUser = {
+      id: 'admin',
+      role: UserRole.ADMIN,
+      email: null,
+      displayName: 'Admin',
+    };
+    const counts = {
+      authSessions: 2,
+      passwordResetTokens: 1,
+      businessProfiles: 0,
+      businessApplications: 0,
+      tradePosts: 1,
+      tradeReviews: 3,
+      contentReviews: 1,
+      reviewReplies: 0,
+      conversations: 2,
+      messages: 5,
+      savedPosts: 1,
+      notifications: 4,
+      auditLogs: 3,
+      harvestBatches: 0,
+      feedbackTickets: 0,
+      feedbackMessages: 0,
+      mediaFiles: 2,
+    };
+    repository.findById.mockResolvedValue(baseUser);
+    repository.getDeletionCounts.mockResolvedValue(counts);
+
+    await expect(
+      service.getDeletionImpact(actor, baseUser.id),
+    ).resolves.toEqual({
+      userId: baseUser.id,
+      displayName: baseUser.displayName,
+      email: baseUser.email,
+      role: baseUser.role,
+      counts,
+    });
+  });
+
+  it('does not allow an admin to delete the currently signed-in account', async () => {
+    const actor: AuthenticatedUser = {
+      id: baseUser.id,
+      role: UserRole.ADMIN,
+      email: null,
+      displayName: 'Admin',
+    };
+
+    await expect(service.deleteAccount(actor, actor.id)).rejects.toMatchObject({
+      code: ErrorCode.CANNOT_DELETE_SELF,
+    });
+    expect(repository.deleteAccountAndRelatedData).not.toHaveBeenCalled();
+  });
+
+  it('deletes related data, purges files, then removes media records', async () => {
+    const actor: AuthenticatedUser = {
+      id: 'admin',
+      role: UserRole.ADMIN,
+      email: null,
+      displayName: 'Admin',
+    };
+    repository.findById.mockResolvedValue(baseUser);
+    repository.deleteAccountAndRelatedData.mockResolvedValue(['media-1']);
+    mediaService.purgeStorage.mockResolvedValue(undefined);
+    repository.hardDeleteMedia.mockResolvedValue(undefined);
+
+    await service.deleteAccount(actor, baseUser.id);
+
+    expect(repository.deleteAccountAndRelatedData).toHaveBeenCalledWith({
+      actorId: actor.id,
+      targetId: baseUser.id,
+    });
+    expect(mediaService.purgeStorage).toHaveBeenCalledWith(['media-1']);
+    expect(repository.hardDeleteMedia).toHaveBeenCalledWith(['media-1']);
   });
 });

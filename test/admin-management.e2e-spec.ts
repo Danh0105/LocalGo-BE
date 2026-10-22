@@ -120,6 +120,64 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
     expect(response.body.meta).toMatchObject({ page: 1, limit: 10, total: 1 });
   });
 
+  it('allows only an admin to create a BUSINESS account that can log in', async () => {
+    const admin = await login('create-business-admin', UserRole.ADMIN);
+    const moderator = await login(
+      'create-business-moderator',
+      UserRole.MODERATOR,
+    );
+    const email = `${marker}-created-business@example.com`;
+    const payload = {
+      displayName: 'Doanh nghiệp được tạo',
+      email,
+      phone: '0907654321',
+      password: 'business-password-123',
+      role: UserRole.BUSINESS,
+    };
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/users')
+      .set('Authorization', `Bearer ${moderator.token}`)
+      .send(payload)
+      .expect(403);
+
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/users')
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(payload)
+      .expect(201);
+    userIds.push(response.body.data.id as string);
+    expect(response.body.data).toMatchObject({
+      displayName: payload.displayName,
+      email,
+      phone: payload.phone,
+      role: UserRole.BUSINESS,
+      status: UserStatus.ACTIVE,
+    });
+    expect(response.body.data).not.toHaveProperty('passwordHash');
+
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email, password: payload.password })
+      .expect(201);
+  });
+
+  it('rejects ADMIN as the role of a newly created account', async () => {
+    const admin = await login('create-admin-role-admin', UserRole.ADMIN);
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/admin/users')
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({
+        displayName: 'Quản trị viên mới',
+        email: `${marker}-forbidden-admin@example.com`,
+        password: 'admin-password-123',
+        role: UserRole.ADMIN,
+      })
+      .expect(400);
+
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
   it('prevents a moderator from blocking an admin', async () => {
     const moderator = await login('moderator', UserRole.MODERATOR);
     const admin = await login('protected-admin', UserRole.ADMIN);
@@ -371,6 +429,261 @@ describe('Admin users, BUSINESS applications and trade owners (e2e)', () => {
     });
     expect(promoted.passwordHash).toBeNull();
     expect(response.body.data.createdUserId).toBe(owner.id);
+  });
+
+  describe('business types', () => {
+    async function createRequestMedia(): Promise<string> {
+      const mediaId = randomUUID();
+      await prisma.media.create({
+        data: {
+          id: mediaId,
+          ownerId: null,
+          storageKey: `${marker}-${mediaId}.jpg`,
+          originalUrl: `https://example.invalid/${mediaId}.jpg`,
+          mimeType: 'image/jpeg',
+          size: 10,
+          checksum: mediaId.replaceAll('-', ''),
+          resourceType: 'BUSINESS_APPLICATION',
+        },
+      });
+      mediaIds.push(mediaId);
+      return mediaId;
+    }
+
+    const identity = {
+      identityNumber: '079200000001',
+      identityIssuedAt: '2020-01-01',
+      identityIssuedPlace: 'Cục CS QLHC về TTXH',
+    };
+
+    it('lists each business type with the form it needs', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/business-applications/business-types')
+        .expect(200);
+      const types = response.body.data as Array<{
+        type: string;
+        postPurposes: string[];
+        applicantTypes: Array<{
+          applicantType: string;
+          requiredFields: Array<{ field: string }>;
+          requiredDocuments: Array<{ type: string }>;
+        }>;
+      }>;
+      expect(types.map((item) => item.type)).toEqual([
+        'TEMPLE_MANAGEMENT',
+        'RESTAURANT',
+        'ACCOMMODATION',
+        'GARDEN',
+        'GENERAL',
+      ]);
+      const temple = types.find((item) => item.type === 'TEMPLE_MANAGEMENT')!;
+      expect(temple.postPurposes).toEqual(['NON_PROFIT']);
+      expect(temple.applicantTypes).toHaveLength(1);
+      expect(
+        temple.applicantTypes[0].requiredDocuments.map((item) => item.type),
+      ).toContain('MANAGEMENT_DECISION');
+      expect(
+        temple.applicantTypes[0].requiredFields.map((item) => item.field),
+      ).toContain('templeName');
+    });
+
+    it('registers a temple management board and stores its type on the approved account', async () => {
+      const admin = await login('temple-request-admin', UserRole.ADMIN);
+      const [front, back, decision] = await Promise.all([
+        createRequestMedia(),
+        createRequestMedia(),
+        createRequestMedia(),
+      ]);
+      const submitted = await request(app.getHttpServer())
+        .post('/api/v1/business-applications/requests')
+        .send({
+          businessType: 'TEMPLE_MANAGEMENT',
+          applicantType: 'ORGANIZATION',
+          businessName: 'Ban quản lý Đền Bà',
+          templeName: 'Đền Bà',
+          // Not a temple detail: must be dropped, not stored.
+          seatingCapacity: 80,
+          contactName: 'Nguyễn Văn C',
+          contactPhone: '0918765432',
+          contactEmail: `${marker}-temple@example.com`,
+          address: 'Xã Truông Mít, Tây Ninh',
+          representativeName: 'Nguyễn Văn C',
+          representativeTitle: 'Trưởng ban',
+          ...identity,
+          documents: [
+            { mediaId: front, type: 'IDENTITY_FRONT', name: 'front.jpg' },
+            { mediaId: back, type: 'IDENTITY_BACK', name: 'back.jpg' },
+            {
+              mediaId: decision,
+              type: 'MANAGEMENT_DECISION',
+              name: 'quyet-dinh.jpg',
+            },
+          ],
+        })
+        .expect(201);
+      const applicationId = submitted.body.data.id as string;
+      applicationIds.push(applicationId);
+      expect(submitted.body.data).toMatchObject({
+        businessType: 'TEMPLE_MANAGEMENT',
+        templeName: 'Đền Bà',
+        seatingCapacity: null,
+        businessCategory: 'Ban quản lý đền/miếu',
+      });
+      const staffNotification = await prisma.notification.findFirstOrThrow({
+        where: {
+          userId: admin.id,
+          type: 'BUSINESS_APPLICATION_SUBMITTED',
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      expect(staffNotification.data).toEqual({ applicationId });
+
+      const approved = await request(app.getHttpServer())
+        .post(`/api/v1/admin/business-applications/${applicationId}/approve`)
+        .set('Authorization', `Bearer ${admin.token}`)
+        .send({ initialPassword: 'legacy-admin-password-123' })
+        .expect(201);
+      expect(approved.headers['cache-control']).toBe('no-store, private');
+      expect(approved.body.data.initialPassword).toMatch(
+        /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z2-9]{16}$/,
+      );
+      expect(approved.body.data.initialPassword).not.toBe(
+        'legacy-admin-password-123',
+      );
+      const createdUserId = approved.body.data.createdUserId as string;
+      userIds.push(createdUserId);
+      const account = await prisma.user.findUniqueOrThrow({
+        where: { id: createdUserId },
+      });
+      expect(account).toMatchObject({
+        role: UserRole.BUSINESS,
+        businessType: 'TEMPLE_MANAGEMENT',
+      });
+      const profile = await prisma.businessProfile.findUniqueOrThrow({
+        where: { userId: createdUserId },
+      });
+      expect(profile).toMatchObject({
+        businessType: 'TEMPLE_MANAGEMENT',
+        businessName: 'Ban quản lý Đền Bà',
+        templeName: 'Đền Bà',
+        isPublic: true,
+      });
+
+      const filtered = await request(app.getHttpServer())
+        .get('/api/v1/admin/business-applications')
+        .query({
+          businessType: 'TEMPLE_MANAGEMENT',
+          search: 'Ban quản lý Đền Bà',
+        })
+        .set('Authorization', `Bearer ${admin.token}`)
+        .expect(200);
+      expect(
+        (filtered.body.data as Array<{ id: string }>).map((item) => item.id),
+      ).toContain(applicationId);
+    });
+
+    it('requires a business licence from an individual restaurant owner', async () => {
+      const [front, back] = await Promise.all([
+        createRequestMedia(),
+        createRequestMedia(),
+      ]);
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/business-applications/requests')
+        .send({
+          businessType: 'RESTAURANT',
+          applicantType: 'INDIVIDUAL',
+          businessName: 'Quán ăn Bến Sông',
+          contactName: 'Trần Thị D',
+          contactPhone: '0919876543',
+          contactEmail: `${marker}-restaurant@example.com`,
+          address: 'Tây Ninh',
+          ...identity,
+          documents: [
+            { mediaId: front, type: 'IDENTITY_FRONT', name: 'front.jpg' },
+            { mediaId: back, type: 'IDENTITY_BACK', name: 'back.jpg' },
+          ],
+        })
+        .expect(400);
+      expect(response.body.error.code).toBe('INVALID_BUSINESS_APPLICATION');
+      expect(response.body.error.message).toContain('đăng ký kinh doanh');
+    });
+  });
+
+  it('accepts a public registration request and creates a BUSINESS account when approved', async () => {
+    const admin = await login('anonymous-request-admin', UserRole.ADMIN);
+    const mediaId = randomUUID();
+    const email = `${marker}-anonymous-request@example.com`;
+    const phone = '0917654321';
+    await prisma.media.create({
+      data: {
+        id: mediaId,
+        ownerId: null,
+        storageKey: `${marker}-${mediaId}.pdf`,
+        originalUrl: `https://example.invalid/${mediaId}.pdf`,
+        mimeType: 'application/pdf',
+        size: 10,
+        checksum: mediaId.replaceAll('-', ''),
+        resourceType: 'BUSINESS_APPLICATION',
+      },
+    });
+    mediaIds.push(mediaId);
+
+    const submitted = await request(app.getHttpServer())
+      .post('/api/v1/business-applications/requests')
+      .send({
+        applicantType: 'ORGANIZATION',
+        businessName: 'Doanh nghiệp chưa có tài khoản',
+        businessCategory: 'Du lịch',
+        contactName: 'Nguyễn Văn B',
+        contactPhone: phone,
+        contactEmail: email,
+        address: 'Tây Ninh',
+        legalName: 'Công ty Công khai',
+        taxCode: `PUBLIC-${marker}`,
+        representativeName: 'Nguyễn Văn B',
+        representativeTitle: 'Giám đốc',
+        documents: [
+          {
+            mediaId,
+            type: 'BUSINESS_LICENSE',
+            name: 'business-license.pdf',
+          },
+        ],
+      })
+      .expect(201);
+    const applicationId = submitted.body.data.id as string;
+    applicationIds.push(applicationId);
+    expect(submitted.body.data).toMatchObject({
+      status: BusinessApplicationStatus.PENDING,
+      createdUserId: null,
+    });
+
+    const approved = await request(app.getHttpServer())
+      .post(`/api/v1/admin/business-applications/${applicationId}/approve`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({})
+      .expect(201);
+    const createdUserId = approved.body.data.createdUserId as string;
+    userIds.push(createdUserId);
+    expect(approved.body.data.status).toBe(BusinessApplicationStatus.APPROVED);
+
+    const createdUser = await prisma.user.findUniqueOrThrow({
+      where: { id: createdUserId },
+    });
+    expect(createdUser).toMatchObject({
+      email,
+      phone,
+      role: UserRole.BUSINESS,
+      status: UserStatus.ACTIVE,
+    });
+    const initialPassword = approved.body.data.initialPassword as string;
+    expect(initialPassword).toMatch(/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z2-9]{16}$/);
+    expect(createdUser.passwordHash).toMatch(/^\$argon2/);
+    expect(createdUser.passwordHash).not.toContain(initialPassword);
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email, password: initialPassword })
+      .expect(201);
   });
 
   it('allows only one of two concurrent approve requests to succeed', async () => {

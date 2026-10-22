@@ -44,6 +44,7 @@ Public list trả `name`, `category`, `role`, `phone`, `email`, `address`, `work
   "supportTopics": ["Hỏi thông tin thủ tục hành chính"],
   "note": "Nên gọi trong giờ hành chính để được hỗ trợ nhanh hơn.",
   "mediaId": "uuid-media",
+  "galleryMediaIds": ["uuid-media-2", "uuid-media-3"],
   "imageAlt": "UBND xã Truông Mít",
   "isActive": true
 }
@@ -62,6 +63,8 @@ Khi `version` cũ, API trả `409 CONTACT_VERSION_CONFLICT`; `error.details[0].l
 1. Upload JPEG/PNG/WebP bằng `POST /api/v1/media/images` với Bearer token.
 2. Dùng `data.id` làm `mediaId` khi tạo/cập nhật liên hệ.
 3. Backend xác minh media chưa xóa, MIME bắt đầu bằng `image/`, thuộc người gọi và chưa được nội dung khác sử dụng. Media được claim thành resource `CONTACT` trong cùng transaction ghi nội dung.
+
+Có thể upload tối đa 10 ảnh/lần qua `POST /api/v1/media/images/batch` (multipart field `files`). `mediaId` là ảnh đại diện; `galleryMediaIds` chứa tối đa 10 ảnh thư viện theo thứ tự hiển thị và không được lặp ảnh đại diện. Public/admin detail trả `galleryImages`; admin response trả thêm `galleryMediaIds`.
 
 Seed không hard-code domain CDN hay đường dẫn máy local. Có thể upload một ảnh placeholder vào media storage của môi trường, sau đó đặt `CONTACT_PLACEHOLDER_MEDIA_ID` trước khi chạy seed. Nếu không đặt, seed vẫn tạo đủ nội dung với `mediaId = null`; admin có thể gắn ảnh sau.
 

@@ -296,6 +296,153 @@ describe('Cuisine (e2e)', () => {
     expect(response.body.error.code).toBe('INVALID_CUISINE_ITEM_MEDIA');
   });
 
+  it('manages a main image, ordered gallery, phone, menu and reviews', async () => {
+    const admin = await login('expanded-content-admin', UserRole.ADMIN);
+    const mediaIds = [randomUUID(), randomUUID(), randomUUID()];
+    await prisma.media.createMany({
+      data: mediaIds.map((mediaId) => ({
+        id: mediaId,
+        ownerId: admin.id,
+        storageKey: `${prefix}-${mediaId}.webp`,
+        originalUrl: `https://example.invalid/${mediaId}.webp`,
+        thumbnailUrl: `https://example.invalid/${mediaId}-thumb.webp`,
+        mimeType: 'image/webp',
+        size: 10,
+        checksum: mediaId.replaceAll('-', ''),
+      })),
+    });
+    const menu = [
+      {
+        id: 'to-thuong',
+        name: 'Tô thường',
+        price: '40.000đ',
+        description: 'Khẩu phần tiêu chuẩn',
+      },
+      {
+        id: 'to-dac-biet',
+        name: 'Tô đặc biệt',
+        price: '55.000đ',
+        description: '',
+      },
+    ];
+    const reviews = [
+      {
+        id: 'review-1',
+        reviewerName: 'Khách A',
+        rating: 5,
+        feedback: 'Món ngon và phục vụ nhanh.',
+        adminResponse: 'Cảm ơn quý khách.',
+      },
+    ];
+
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/admin/cuisine')
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(
+        body({
+          id: `${prefix}-expanded-content`,
+          mediaId: mediaIds[0],
+          galleryMediaIds: [mediaIds[1], mediaIds[2]],
+          contactPhone: '0900 123 456',
+          menu,
+          reviews,
+        }),
+      )
+      .expect(201);
+
+    expect(created.body.data).toMatchObject({
+      mediaId: mediaIds[0],
+      galleryMediaIds: [mediaIds[1], mediaIds[2]],
+      contactPhone: '0900 123 456',
+      menu,
+      reviews,
+      averageRating: 5,
+      reviewCount: 1,
+    });
+    expect(created.body.data.galleryImages).toEqual([
+      expect.objectContaining({ mediaId: mediaIds[1], sortOrder: 0 }),
+      expect.objectContaining({ mediaId: mediaIds[2], sortOrder: 1 }),
+    ]);
+
+    const publicDetail = await request(app.getHttpServer())
+      .get(`/api/v1/cuisine/${prefix}-expanded-content`)
+      .expect(200);
+    expect(publicDetail.body.data).toMatchObject({
+      contactPhone: '0900 123 456',
+      menu,
+      reviews,
+      averageRating: 5,
+      reviewCount: 1,
+    });
+
+    const updated = await request(app.getHttpServer())
+      .put(`/api/v1/admin/cuisine/${prefix}-expanded-content`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(
+        body({
+          version: 1,
+          mediaId: mediaIds[0],
+          galleryMediaIds: [mediaIds[2], mediaIds[1]],
+        }),
+      )
+      .expect(200);
+    expect(updated.body.data.galleryMediaIds).toEqual([
+      mediaIds[2],
+      mediaIds[1],
+    ]);
+    expect(updated.body.data.menu).toEqual(menu);
+    expect(updated.body.data.reviews).toEqual(reviews);
+  });
+
+  it('rejects invalid cuisine management data', async () => {
+    const admin = await login('expanded-validation-admin', UserRole.ADMIN);
+    const mediaId = randomUUID();
+    await prisma.media.create({
+      data: {
+        id: mediaId,
+        ownerId: admin.id,
+        storageKey: `${prefix}-${mediaId}.webp`,
+        originalUrl: `https://example.invalid/${mediaId}.webp`,
+        mimeType: 'image/webp',
+        size: 10,
+        checksum: mediaId.replaceAll('-', ''),
+      },
+    });
+    const invalidOverrides: Record<string, unknown>[] = [
+      { contactPhone: '0900-abc' },
+      { mediaId, galleryMediaIds: [mediaId] },
+      {
+        menu: [
+          { id: 'trung', name: 'Món A', price: '10.000đ' },
+          { id: 'trung', name: 'Món B', price: '20.000đ' },
+        ],
+      },
+      {
+        reviews: [
+          {
+            id: 'trung',
+            reviewerName: 'A',
+            rating: 5,
+            feedback: 'Tốt',
+          },
+          {
+            id: 'trung',
+            reviewerName: 'B',
+            rating: 4,
+            feedback: 'Ổn',
+          },
+        ],
+      },
+    ];
+    for (const [index, overrides] of invalidOverrides.entries()) {
+      await request(app.getHttpServer())
+        .post('/api/v1/admin/cuisine')
+        .set('Authorization', `Bearer ${admin.token}`)
+        .send(body({ id: `${prefix}-invalid-expanded-${index}`, ...overrides }))
+        .expect(400);
+    }
+  });
+
   it('parses legacy string suggestedPlaces into suggestedPlaceDetails and derives the same names', async () => {
     const publicResponse = await request(app.getHttpServer())
       .get(`/api/v1/cuisine/${ids.first}`)

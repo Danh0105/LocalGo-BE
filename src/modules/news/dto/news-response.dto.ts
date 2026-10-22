@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { NewsCategoryLabel } from '../news.constants';
+import { GalleryImageResponseDto } from '../../media/dto/gallery-image-response.dto';
 
 export class NewsArticleListItemResponseDto {
   @ApiProperty()
@@ -28,6 +29,9 @@ export class NewsArticleListItemResponseDto {
   @ApiProperty()
   summary: string;
 
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
+
   @ApiPropertyOptional({ nullable: true })
   imageUrl: string | null;
 
@@ -50,11 +54,17 @@ export class NewsArticleResponseDto extends NewsArticleListItemResponseDto {
     description: 'Nhãn hiển thị dạng text, không phải link điều hướng thật.',
   })
   relatedLinks: string[];
+
+  @ApiProperty({ type: [GalleryImageResponseDto] })
+  galleryImages: GalleryImageResponseDto[];
 }
 
 export class NewsArticleAdminResponseDto extends NewsArticleResponseDto {
   @ApiPropertyOptional({ nullable: true })
   mediaId: string | null;
+
+  @ApiProperty({ type: [String] })
+  galleryMediaIds: string[];
 
   @ApiProperty()
   isActive: boolean;

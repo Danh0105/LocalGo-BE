@@ -176,6 +176,78 @@ describe('Festivals (e2e)', () => {
     expect(duplicate.body.error.code).toBe('FESTIVAL_SLUG_EXISTS');
   });
 
+  it('creates, returns, reorders and removes gallery images', async () => {
+    const admin = await login('gallery-admin', UserRole.ADMIN);
+    const mediaIds = [randomUUID(), randomUUID(), randomUUID()];
+    await prisma.media.createMany({
+      data: mediaIds.map((id, index) => ({
+        id,
+        ownerId: admin.id,
+        storageKey: `${prefix}-gallery-${index}.webp`,
+        originalUrl: `https://example.invalid/gallery-${index}.webp`,
+        thumbnailUrl: `https://example.invalid/gallery-${index}-thumb.webp`,
+        mimeType: 'image/webp',
+        size: 10,
+        checksum: id.replaceAll('-', ''),
+      })),
+    });
+    const id = `${prefix}-gallery`;
+
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/admin/festivals')
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(
+        body({
+          id,
+          mediaId: mediaIds[0],
+          galleryMediaIds: [mediaIds[1], mediaIds[2]],
+        }),
+      )
+      .expect(201);
+    expect(created.body.data.galleryMediaIds).toEqual([
+      mediaIds[1],
+      mediaIds[2],
+    ]);
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/v1/festivals/${id}`)
+      .expect(200);
+    expect(detail.body.data.galleryImages).toEqual([
+      expect.objectContaining({ mediaId: mediaIds[1], sortOrder: 0 }),
+      expect.objectContaining({ mediaId: mediaIds[2], sortOrder: 1 }),
+    ]);
+
+    const updated = await request(app.getHttpServer())
+      .put(`/api/v1/admin/festivals/${id}`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(
+        body({
+          version: 1,
+          mediaId: mediaIds[0],
+          galleryMediaIds: [mediaIds[2]],
+        }),
+      )
+      .expect(200);
+    expect(updated.body.data.galleryMediaIds).toEqual([mediaIds[2]]);
+    expect(
+      (await prisma.media.findUniqueOrThrow({ where: { id: mediaIds[1] } }))
+        .deletedAt,
+    ).not.toBeNull();
+
+    const duplicateImage = await request(app.getHttpServer())
+      .put(`/api/v1/admin/festivals/${id}`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(
+        body({
+          version: 2,
+          mediaId: mediaIds[2],
+          galleryMediaIds: [mediaIds[2]],
+        }),
+      )
+      .expect(400);
+    expect(duplicateImage.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
   it('updates only the target and returns latest data on a stale version conflict', async () => {
     const firstAdmin = await login('update-first', UserRole.ADMIN);
     const secondAdmin = await login('update-second', UserRole.ADMIN);

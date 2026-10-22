@@ -20,6 +20,7 @@ import {
   type OcopCategoryLabel,
   type OcopRatingValue,
 } from '../ocop.constants';
+import { IsGoogleMapsUrl } from '../../../common/validation/google-maps-url.validator';
 
 const trim = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
@@ -59,6 +60,17 @@ export class OcopContentDto {
   @MinLength(1)
   @MaxLength(255)
   address: string;
+
+  @ApiPropertyOptional({
+    maxLength: 2048,
+    example: 'https://maps.app.goo.gl/example',
+  })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(2048)
+  @IsGoogleMapsUrl()
+  googleMapsUrl?: string;
 
   @ApiProperty({ maxLength: 100 })
   @Transform(trim)

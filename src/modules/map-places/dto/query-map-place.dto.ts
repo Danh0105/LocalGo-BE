@@ -1,6 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import {
   MAP_PLACE_CATEGORIES,
@@ -12,6 +18,22 @@ export class QueryMapPlacePublicDto {
   @IsOptional()
   @IsIn(MAP_PLACE_CATEGORIES)
   category?: MapPlaceCategoryLabel;
+
+  @ApiPropertyOptional({
+    description:
+      'Tìm gần đúng theo tên, chủ đề, danh mục, địa chỉ và nội dung địa điểm',
+    minLength: 2,
+    maxLength: 100,
+    example: 'ăn uống',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  search?: string;
 }
 
 export class QueryMapPlaceAdminDto extends PaginationQueryDto {

@@ -22,7 +22,33 @@ export class FeedbackTicketLookupChannelDto {
   category: string;
 }
 
+export class FeedbackMessageResponseDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty({ enum: ['user', 'admin'] })
+  senderRole: 'user' | 'admin';
+
+  @ApiProperty()
+  senderName: string;
+
+  @ApiProperty({ example: 'Cảm ơn, tôi xin bổ sung thêm thông tin.' })
+  content: string;
+
+  @ApiProperty({ type: [MediaResponseDto] })
+  attachments: MediaResponseDto[];
+
+  @ApiProperty()
+  createdAt: Date;
+}
+
 export class FeedbackTicketLookupResponseDto {
+  @ApiProperty({
+    example: 'b39f86fe-8758-44ef-938b-f6fcbd8d01d4',
+    description: 'ID nội bộ đã lưu của ticket, dùng cho các API hội thoại.',
+  })
+  id: string;
+
   @ApiProperty({ example: 'PH-A7K9QX' })
   ticketCode: string;
 
@@ -37,6 +63,9 @@ export class FeedbackTicketLookupResponseDto {
 
   @ApiProperty({ type: [MediaResponseDto] })
   attachments: MediaResponseDto[];
+
+  @ApiProperty({ type: [FeedbackMessageResponseDto] })
+  messages: FeedbackMessageResponseDto[];
 
   @ApiProperty()
   createdAt: Date;
@@ -78,6 +107,9 @@ export class FeedbackTicketAdminResponseDto {
 
   @ApiProperty({ type: [MediaResponseDto] })
   attachments: MediaResponseDto[];
+
+  @ApiProperty({ type: [FeedbackMessageResponseDto] })
+  messages: FeedbackMessageResponseDto[];
 
   @ApiProperty()
   createdAt: Date;

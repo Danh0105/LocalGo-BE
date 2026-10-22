@@ -86,6 +86,7 @@ export class ZaloOaMessagingService {
 
     try {
       const response = await fetch(url, {
+        signal: AbortSignal.timeout(10_000),
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

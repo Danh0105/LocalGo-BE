@@ -14,6 +14,7 @@ import { RealZaloAuthProvider } from './providers/real-zalo-auth.provider';
 import { ZALO_AUTH_PROVIDER } from './providers/zalo-auth.token';
 import { AuthService } from './services/auth.service';
 import { TokenService } from './services/token.service';
+import { PasswordResetMailService } from './services/password-reset-mail.service';
 import { JwtAccessStrategy } from './strategies/jwt-access.strategy';
 
 @Module({
@@ -27,6 +28,7 @@ import { JwtAccessStrategy } from './strategies/jwt-access.strategy';
   providers: [
     AuthService,
     TokenService,
+    PasswordResetMailService,
     JwtAccessStrategy,
     {
       provide: ZALO_AUTH_PROVIDER,
@@ -42,6 +44,7 @@ import { JwtAccessStrategy } from './strategies/jwt-access.strategy';
     { provide: APP_GUARD, useClass: JwtAccessGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
-  exports: [AuthService],
+  // TokenService is shared with the notifications socket gateway (handshake auth).
+  exports: [AuthService, TokenService],
 })
 export class AuthModule {}

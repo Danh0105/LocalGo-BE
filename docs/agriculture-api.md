@@ -4,19 +4,23 @@ Module `agriculture` quản lý danh sách nhiều nội dung nông nghiệp (c�
 
 ## Endpoints
 
-| Method | Endpoint                                              | Quyền            | Mô tả                                                       |
-| ------ | ------------------------------------------------------ | ---------------- | ------------------------------------------------------------ |
-| GET    | `/agriculture?category=Chăn nuôi`                       | Public           | Chỉ bản ghi active, sắp xếp `sortOrder`, `createdAt`, `id`   |
-| GET    | `/agriculture/:id`                                      | Public           | Chi tiết active, gồm `description`, `highlights`, `support`  |
-| GET    | `/admin/agriculture?page=1&limit=20&category=&search=`  | ADMIN, MODERATOR | Danh sách gồm cả bản ghi ẩn, tìm theo tên/khu vực            |
-| GET    | `/admin/agriculture/:id`                                | ADMIN, MODERATOR | Chi tiết và `version` hiện tại                                |
-| POST   | `/admin/agriculture`                                    | ADMIN, MODERATOR | Tạo mới, tự sinh slug nếu không gửi `id`                      |
-| PUT    | `/admin/agriculture/:id`                                | ADMIN, MODERATOR | Cập nhật toàn bộ với optimistic locking                       |
-| PATCH  | `/admin/agriculture/:id/status`                         | ADMIN, MODERATOR | Ẩn/hiện với optimistic locking                                |
-| PATCH  | `/admin/agriculture/reorder`                            | ADMIN, MODERATOR | Cập nhật thứ tự hàng loạt trong transaction                   |
-| DELETE | `/admin/agriculture/:id`                                | ADMIN, MODERATOR | Xóa mục nông nghiệp                                           |
+| Method | Endpoint                                               | Quyền            | Mô tả                                                       |
+| ------ | ------------------------------------------------------ | ---------------- | ----------------------------------------------------------- |
+| GET    | `/agriculture?category=Chăn nuôi`                      | Public           | Chỉ bản ghi active, sắp xếp `sortOrder`, `createdAt`, `id`  |
+| GET    | `/agriculture/:id`                                     | Public           | Chi tiết active, gồm `description`, `highlights`, `support` |
+| GET    | `/admin/agriculture?page=1&limit=20&category=&search=` | ADMIN, MODERATOR | Danh sách gồm cả bản ghi ẩn, tìm theo tên/khu vực           |
+| GET    | `/admin/agriculture/:id`                               | ADMIN, MODERATOR | Chi tiết và `version` hiện tại                              |
+| POST   | `/admin/agriculture`                                   | ADMIN, MODERATOR | Tạo mới, tự sinh slug nếu không gửi `id`                    |
+| PUT    | `/admin/agriculture/:id`                               | ADMIN, MODERATOR | Cập nhật toàn bộ với optimistic locking                     |
+| PATCH  | `/admin/agriculture/:id/status`                        | ADMIN, MODERATOR | Ẩn/hiện với optimistic locking                              |
+| PATCH  | `/admin/agriculture/reorder`                           | ADMIN, MODERATOR | Cập nhật thứ tự hàng loạt trong transaction                 |
+| DELETE | `/admin/agriculture/:id`                               | ADMIN, MODERATOR | Xóa mục nông nghiệp                                         |
 
 Public list chỉ trả dữ liệu cần cho thẻ danh sách. Public detail trả thêm `description`, `highlights` và `support`. Public API không phân biệt bản ghi không tồn tại và bản ghi đang ẩn: cả hai đều trả `404 AGRICULTURE_ITEM_NOT_FOUND`.
+
+Tin giao thương của tài khoản **Chủ vườn – nhà vườn** được lấy bằng
+`GET /api/v1/trade-posts?section=agriculture`. Cùng một tin Chủ vườn cũng có
+thể xuất hiện ở mục Đặc sản. Xem `docs/trade-post-section-integration.md`.
 
 `GET /agriculture/:id` trả `ETag: "agriculture-{id}-{updatedAtMillis}"` và `Cache-Control: public, max-age=60, must-revalidate`. Mọi thao tác cập nhật làm đổi `updatedAt`, vì vậy ETag cũ tự mất hiệu lực.
 
@@ -35,6 +39,7 @@ Public list chỉ trả dữ liệu cần cho thẻ danh sách. Public detail tr
   "highlights": ["Có vùng sản xuất tập trung, thuận lợi liên kết tiêu thụ"],
   "support": "Khuyến khích hộ dân đăng ký tham gia tổ liên kết...",
   "mediaId": "uuid-media",
+  "galleryMediaIds": ["uuid-media-2", "uuid-media-3"],
   "imageAlt": "Vùng nguyên liệu mía Lộc Trung",
   "isActive": true
 }
@@ -49,6 +54,8 @@ Khi `version` cũ, API trả `409 AGRICULTURE_ITEM_VERSION_CONFLICT`; `error.det
 1. Upload JPEG/PNG/WebP bằng `POST /api/v1/media/images` với Bearer token.
 2. Dùng `data.id` làm `mediaId` khi tạo/cập nhật mục nông nghiệp.
 3. Backend xác minh media chưa xóa, MIME bắt đầu bằng `image/`, thuộc người gọi và chưa được nội dung khác sử dụng. Media được claim thành resource `AGRICULTURE` trong cùng transaction ghi nội dung.
+
+Có thể upload tối đa 10 ảnh/lần qua `POST /api/v1/media/images/batch` (multipart field `files`). `mediaId` là ảnh đại diện; `galleryMediaIds` chứa tối đa 10 ảnh thư viện theo thứ tự hiển thị và không được lặp ảnh đại diện. Public/admin detail trả `galleryImages`; admin response trả thêm `galleryMediaIds`.
 
 Seed không hard-code domain CDN hay đường dẫn máy local. Có thể upload một ảnh placeholder vào media storage của môi trường, sau đó đặt `AGRICULTURE_PLACEHOLDER_MEDIA_ID` trước khi chạy seed. Nếu không đặt, seed vẫn tạo đủ nội dung với `mediaId = null`; admin có thể gắn ảnh sau.
 

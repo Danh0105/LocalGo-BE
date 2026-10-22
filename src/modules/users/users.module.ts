@@ -4,8 +4,10 @@ import { UserRepository } from './repositories/user.repository';
 import { UserService } from './services/user.service';
 import { UsersAdminController } from './controllers/users-admin.controller';
 import { UserAdminService } from './services/user-admin.service';
+import { MediaModule } from '../media/media.module';
 
 @Module({
+  imports: [MediaModule],
   controllers: [UsersController, UsersAdminController],
   providers: [UserRepository, UserService, UserAdminService],
   exports: [UserService],

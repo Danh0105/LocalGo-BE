@@ -65,7 +65,7 @@ describe('Map places (e2e)', () => {
       data: [
         {
           id: ids.first,
-          name: 'Điểm Thứ Nhất',
+          name: 'UBND xã Kiểm Thử',
           category: MapPlaceCategory.HANH_CHINH,
           address: 'Địa chỉ A',
           lat: 11.2418,
@@ -143,6 +143,63 @@ describe('Map places (e2e)', () => {
     expect(
       filteredItems.filter((item) => item.id.startsWith(prefix)),
     ).toHaveLength(1);
+  });
+
+  it('searches by related topics, content and expanded abbreviations', async () => {
+    await prisma.mapPlace.createMany({
+      data: [
+        {
+          id: `${prefix}-food`,
+          name: 'Quán cơm quê Kiểm Thử',
+          category: MapPlaceCategory.AM_THUC,
+          address: 'Địa chỉ món ngon',
+          lat: 11.23,
+          lng: 106.21,
+          openTime: 'Cả ngày',
+          distanceFromCenter: '2 km',
+          summary: 'Phục vụ bữa trưa và bữa tối.',
+          description: ['Món ăn địa phương.'],
+          highlights: ['Dùng bữa gia đình'],
+          directionNote: '',
+          sortOrder: 3,
+          isActive: true,
+        },
+        {
+          id: `${prefix}-temple`,
+          name: 'Chùa Kiểm Thử',
+          category: MapPlaceCategory.DI_TICH,
+          address: 'Địa chỉ tâm linh',
+          lat: 11.25,
+          lng: 106.22,
+          openTime: 'Cả ngày',
+          distanceFromCenter: '3 km',
+          summary: 'Không gian thanh tịnh.',
+          description: ['Điểm sinh hoạt tín ngưỡng.'],
+          highlights: [],
+          directionNote: '',
+          sortOrder: 4,
+          isActive: true,
+        },
+      ],
+    });
+
+    const cases = [
+      { search: 'ăn uống', expectedId: `${prefix}-food` },
+      { search: 'tham quan', expectedId: ids.second },
+      { search: 'chùa chiền', expectedId: `${prefix}-temple` },
+      { search: 'ủy ban nhân dẫn', expectedId: ids.first },
+    ];
+
+    for (const testCase of cases) {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/map-places')
+        .query({ search: testCase.search })
+        .expect(200);
+      const ownIds = (response.body.data as Array<{ id: string }>)
+        .map((item) => item.id)
+        .filter((id) => id.startsWith(prefix));
+      expect(ownIds).toContain(testCase.expectedId);
+    }
   });
 
   it('public detail hides existence of inactive and missing records', async () => {

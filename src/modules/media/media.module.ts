@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MulterModule } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
 import type { MediaConfig } from '../../config/media.config';
 import { MediaController } from './controllers/media.controller';
 import { LocalMediaStorageService } from './providers/storage/local-media-storage.provider';
 import { MEDIA_STORAGE_SERVICE } from './providers/storage/media-storage.token';
 import { MediaRepository } from './repositories/media.repository';
 import { MediaService } from './services/media.service';
+import { BoundedMemoryStorage } from './providers/bounded-memory.storage';
 
 @Module({
   imports: [
@@ -22,8 +22,16 @@ import { MediaService } from './services/media.service';
           1024 *
           1024;
         return {
-          storage: memoryStorage(),
-          limits: { fileSize: maxBytes },
+          storage: new BoundedMemoryStorage(
+            Number(configService.get('MAX_UPLOAD_TOTAL_MB', 64)) * 1024 * 1024,
+          ),
+          limits: {
+            fileSize: maxBytes,
+            files: 20,
+            fields: 32,
+            fieldSize: 64 * 1024,
+            parts: 52,
+          },
         };
       },
       inject: [ConfigService],
@@ -47,6 +55,7 @@ import { MediaService } from './services/media.service';
       inject: [ConfigService],
     },
   ],
-  exports: [MediaService],
+  // Share the same bounds with feedback and business document interceptors.
+  exports: [MediaService, MulterModule],
 })
 export class MediaModule {}

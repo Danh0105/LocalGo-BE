@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
   MediaResourceType,
+  MapLocationSource,
   Prisma,
   type MapPlace,
   type Media,
@@ -10,8 +11,11 @@ import { ErrorCode } from '../../../common/constants/error-codes.constant';
 import { paginate } from '../../../common/pagination/pagination.util';
 import { AppException } from '../../../common/exceptions/app.exception';
 import { slugify } from '../../../common/utils/slugify.util';
+import { matchesExpandedSearch } from '../../../common/utils/search-query.util';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaService } from '../../media/services/media.service';
+import { MapLocationService } from '../../map-location/map-location.service';
+import type { MapLocationResponseDto } from '../../../common/dto/map-location-response.dto';
 import {
   ReorderMapPlacesDto,
   UpdateMapPlaceStatusDto,
@@ -51,12 +55,13 @@ export class MapPlaceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mediaService: MediaService,
+    private readonly mapLocations: MapLocationService,
   ) {}
 
   async publicList(
     query: QueryMapPlacePublicDto,
   ): Promise<MapPlaceListItemResponseDto[]> {
-    const records = await this.prisma.mapPlace.findMany({
+    let records = await this.prisma.mapPlace.findMany({
       where: {
         isActive: true,
         ...(query.category
@@ -66,7 +71,42 @@ export class MapPlaceService {
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       include: includeMapPlace,
     });
-    return records.map((record) => this.toListDto(record));
+    const search = query.search;
+    if (search) {
+      records = records.filter((record) =>
+        matchesExpandedSearch(
+          [
+            record.id,
+            record.name,
+            MAP_PLACE_CATEGORY_FROM_DB[record.category],
+            record.category,
+            record.address,
+            record.openTime,
+            record.summary,
+            record.description,
+            record.highlights,
+            record.directionNote,
+          ],
+          search,
+        ),
+      );
+    }
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.MAP_PLACE,
+      records.map(({ id }) => id),
+    );
+    return records.map((record) =>
+      this.toListDto(
+        record,
+        this.mapLocations.getFromMap(
+          locations,
+          MapLocationSource.MAP_PLACE,
+          record.id,
+          '',
+          record.googleMapsUrl,
+        ),
+      ),
+    );
   }
 
   async publicDetail(id: string): Promise<MapPlaceResponseDto> {
@@ -75,7 +115,15 @@ export class MapPlaceService {
       include: includeMapPlace,
     });
     if (!record) throw this.notFound();
-    return this.toPublicDto(record);
+    return this.toPublicDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.MAP_PLACE,
+        record.id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async adminList(query: QueryMapPlaceAdminDto) {
@@ -102,8 +150,23 @@ export class MapPlaceService {
       }),
       this.prisma.mapPlace.count({ where }),
     ]);
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.MAP_PLACE,
+      records.map(({ id }) => id),
+    );
     return paginate(
-      records.map((record) => this.toAdminDto(record)),
+      records.map((record) =>
+        this.toAdminDto(
+          record,
+          this.mapLocations.getFromMap(
+            locations,
+            MapLocationSource.MAP_PLACE,
+            record.id,
+            '',
+            record.googleMapsUrl,
+          ),
+        ),
+      ),
       query.page,
       query.limit,
       total,
@@ -111,7 +174,16 @@ export class MapPlaceService {
   }
 
   async adminDetail(id: string): Promise<MapPlaceAdminResponseDto> {
-    return this.toAdminDto(await this.findOrThrow(id));
+    const record = await this.findOrThrow(id);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.MAP_PLACE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async create(
@@ -134,6 +206,7 @@ export class MapPlaceService {
           name: dto.name,
           category: MAP_PLACE_CATEGORY_TO_DB[dto.category],
           address: dto.address,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           lat: dto.coordinates.lat,
           lng: dto.coordinates.lng,
           openTime: dto.openTime,
@@ -152,6 +225,11 @@ export class MapPlaceService {
         include: includeMapPlace,
       });
       await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.mapLocations.sync(
+        tx,
+        { source: MapLocationSource.MAP_PLACE, sourceId: id },
+        dto.googleMapsUrl,
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -163,7 +241,15 @@ export class MapPlaceService {
       });
       return created;
     });
-    return this.toAdminDto(record);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.MAP_PLACE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async update(
@@ -182,6 +268,9 @@ export class MapPlaceService {
             name: dto.name,
             category: MAP_PLACE_CATEGORY_TO_DB[dto.category],
             address: dto.address,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             lat: dto.coordinates.lat,
             lng: dto.coordinates.lng,
             openTime: dto.openTime,
@@ -212,6 +301,11 @@ export class MapPlaceService {
           },
         );
         await this.claimMedia(tx, dto.mediaId, actorId, id);
+        await this.mapLocations.sync(
+          tx,
+          { source: MapLocationSource.MAP_PLACE, sourceId: id },
+          dto.googleMapsUrl ?? current.googleMapsUrl,
+        );
         await tx.auditLog.create({
           data: {
             actorId,
@@ -230,7 +324,15 @@ export class MapPlaceService {
       },
     );
     await this.mediaService.purgeStorage([deletedMediaId]);
-    return this.toAdminDto(record);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.MAP_PLACE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async updateStatus(
@@ -262,7 +364,15 @@ export class MapPlaceService {
         include: includeMapPlace,
       });
     });
-    return this.toAdminDto(record);
+    return this.toAdminDto(
+      record,
+      await this.mapLocations.getOne(
+        MapLocationSource.MAP_PLACE,
+        id,
+        '',
+        record.googleMapsUrl,
+      ),
+    );
   }
 
   async reorder(
@@ -276,7 +386,7 @@ export class MapPlaceService {
         'Danh sách sắp xếp chứa ID trùng',
       );
     }
-    return this.prisma.$transaction(async (tx) => {
+    const records = await this.prisma.$transaction(async (tx) => {
       const found = await tx.mapPlace.count({ where: { id: { in: ids } } });
       if (found !== ids.length) throw this.notFound();
       for (const item of dto.items) {
@@ -304,14 +414,35 @@ export class MapPlaceService {
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
         include: includeMapPlace,
       });
-      return records.map((record) => this.toAdminDto(record));
+      return records;
     });
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.MAP_PLACE,
+      records.map(({ id }) => id),
+    );
+    return records.map((record) =>
+      this.toAdminDto(
+        record,
+        this.mapLocations.getFromMap(
+          locations,
+          MapLocationSource.MAP_PLACE,
+          record.id,
+          '',
+          record.googleMapsUrl,
+        ),
+      ),
+    );
   }
 
   async remove(actorId: string, id: string): Promise<void> {
     const current = await this.findOrThrow(id);
     const deletedMediaId = await this.prisma.$transaction(async (tx) => {
       await tx.mapPlace.delete({ where: { id } });
+      await this.mapLocations.deleteForRecord(
+        tx,
+        MapLocationSource.MAP_PLACE,
+        id,
+      );
       const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
         previousMediaId: current.mediaId,
         nextMediaId: null,
@@ -340,12 +471,17 @@ export class MapPlaceService {
     return record;
   }
 
-  private toListDto(record: MapPlaceRecord): MapPlaceListItemResponseDto {
+  private toListDto(
+    record: MapPlaceRecord,
+    mapLocation: MapLocationResponseDto | null,
+  ): MapPlaceListItemResponseDto {
     return {
       id: record.id,
       name: record.name,
       category: MAP_PLACE_CATEGORY_FROM_DB[record.category],
       address: record.address,
+      googleMapsUrl: record.googleMapsUrl,
+      mapLocation,
       coordinates: {
         lat: Number(record.lat),
         lng: Number(record.lng),
@@ -360,18 +496,24 @@ export class MapPlaceService {
     };
   }
 
-  private toPublicDto(record: MapPlaceRecord): MapPlaceResponseDto {
+  private toPublicDto(
+    record: MapPlaceRecord,
+    mapLocation: MapLocationResponseDto | null,
+  ): MapPlaceResponseDto {
     return {
-      ...this.toListDto(record),
+      ...this.toListDto(record, mapLocation),
       description: this.readStringArray(record.description),
       highlights: this.readStringArray(record.highlights),
       directionNote: record.directionNote,
     };
   }
 
-  private toAdminDto(record: MapPlaceRecord): MapPlaceAdminResponseDto {
+  private toAdminDto(
+    record: MapPlaceRecord,
+    mapLocation: MapLocationResponseDto | null,
+  ): MapPlaceAdminResponseDto {
     return {
-      ...this.toPublicDto(record),
+      ...this.toPublicDto(record, mapLocation),
       mediaId: record.mediaId,
       isActive: record.isActive,
       version: record.version,
@@ -464,11 +606,29 @@ export class MapPlaceService {
       include: includeMapPlace,
     });
     if (!latest) return this.notFound();
+    const locations = await this.mapLocations.getForRecords(
+      MapLocationSource.MAP_PLACE,
+      [id],
+      tx,
+    );
     return new AppException(
       ErrorCode.MAP_PLACE_VERSION_CONFLICT,
       'Điểm bản đồ đã được người khác cập nhật, vui lòng tải lại',
       HttpStatus.CONFLICT,
-      [{ latest: this.toAdminDto(latest) }],
+      [
+        {
+          latest: this.toAdminDto(
+            latest,
+            this.mapLocations.getFromMap(
+              locations,
+              MapLocationSource.MAP_PLACE,
+              id,
+              '',
+              latest.googleMapsUrl,
+            ),
+          ),
+        },
+      ],
     );
   }
 

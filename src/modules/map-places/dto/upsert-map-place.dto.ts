@@ -19,6 +19,7 @@ import {
   MAP_PLACE_CATEGORIES,
   type MapPlaceCategoryLabel,
 } from '../map-place.constants';
+import { IsGoogleMapsUrl } from '../../../common/validation/google-maps-url.validator';
 import { CoordinatesDto } from './coordinates.dto';
 
 const trim = ({ value }: { value: unknown }): unknown =>
@@ -48,6 +49,17 @@ export class MapPlaceContentDto {
   @MinLength(1)
   @MaxLength(255)
   address: string;
+
+  @ApiPropertyOptional({
+    maxLength: 2048,
+    example: 'https://maps.app.goo.gl/example',
+  })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(2048)
+  @IsGoogleMapsUrl()
+  googleMapsUrl?: string;
 
   @ApiProperty({ type: CoordinatesDto })
   @ValidateNested()

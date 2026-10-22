@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { FestivalCategoryLabel } from '../festival.constants';
+import { GalleryImageResponseDto } from '../../media/dto/gallery-image-response.dto';
 
 export class FestivalListItemResponseDto {
   @ApiProperty()
@@ -23,6 +24,9 @@ export class FestivalListItemResponseDto {
 
   @ApiProperty()
   location: string;
+
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
 
   @ApiProperty()
   scale: string;
@@ -52,11 +56,17 @@ export class FestivalResponseDto extends FestivalListItemResponseDto {
 
   @ApiProperty()
   note: string;
+
+  @ApiProperty({ type: [GalleryImageResponseDto] })
+  galleryImages: GalleryImageResponseDto[];
 }
 
 export class FestivalAdminResponseDto extends FestivalResponseDto {
   @ApiPropertyOptional({ nullable: true })
   mediaId: string | null;
+
+  @ApiProperty({ type: [String] })
+  galleryMediaIds: string[];
 
   @ApiProperty()
   isActive: boolean;

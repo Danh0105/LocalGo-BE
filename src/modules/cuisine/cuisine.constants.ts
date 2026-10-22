@@ -1,5 +1,9 @@
 import { CuisineCategory as PrismaCuisineCategory } from '../../../generated/prisma';
 
+export const MAX_CUISINE_GALLERY_IMAGES = 10;
+export const MAX_CUISINE_MENU_ITEMS = 50;
+export const MAX_CUISINE_REVIEWS = 100;
+
 export const CUISINE_CATEGORIES = [
   'Món nước',
   'Món nướng',

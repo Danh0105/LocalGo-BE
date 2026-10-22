@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { AgricultureCategoryLabel } from '../agriculture.constants';
+import { GalleryImageResponseDto } from '../../media/dto/gallery-image-response.dto';
 
 export class AgricultureListItemResponseDto {
   @ApiProperty()
@@ -15,6 +16,9 @@ export class AgricultureListItemResponseDto {
 
   @ApiProperty()
   location: string;
+
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
 
   @ApiProperty()
   season: string;
@@ -47,11 +51,17 @@ export class AgricultureResponseDto extends AgricultureListItemResponseDto {
 
   @ApiProperty()
   support: string;
+
+  @ApiProperty({ type: [GalleryImageResponseDto] })
+  galleryImages: GalleryImageResponseDto[];
 }
 
 export class AgricultureAdminResponseDto extends AgricultureResponseDto {
   @ApiPropertyOptional({ nullable: true })
   mediaId: string | null;
+
+  @ApiProperty({ type: [String] })
+  galleryMediaIds: string[];
 
   @ApiProperty()
   isActive: boolean;

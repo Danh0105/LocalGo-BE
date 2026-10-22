@@ -20,7 +20,14 @@ Module `temples` quản lý danh sách nhiều điểm du lịch. Mọi endpoint
 
 Public list chỉ trả dữ liệu cần cho thẻ danh sách. Public detail trả thêm `description` và `events`. Public API không phân biệt bản ghi không tồn tại và bản ghi đang ẩn: cả hai đều trả `404 TEMPLE_NOT_FOUND`.
 
-`GET /temples/:id` trả `ETag: "temple-{id}-{updatedAtMillis}"` và `Cache-Control: public, max-age=60, must-revalidate`. Mọi thao tác cập nhật làm đổi `updatedAt`, vì vậy ETag cũ tự mất hiệu lực.
+Tin phi lợi nhuận của tài khoản **Ban quản lý đền/miếu** được lấy bằng
+`GET /api/v1/trade-posts?section=temples`. Backend không trả tin thương mại ở
+mục này, kể cả dữ liệu cũ không hợp lệ. Xem
+`docs/trade-post-section-integration.md`.
+
+`GET /temples/:id` trả ETag gồm `id`, `updatedAt` và hash trạng thái định vị,
+cùng `Cache-Control: public, max-age=60, must-revalidate`. ETag đổi khi nội dung
+hoặc kết quả worker đổi.
 
 ## Request cập nhật
 

@@ -1,6 +1,7 @@
 import { HttpStatus, Injectable, Inject } from '@nestjs/common';
 import * as argon2 from 'argon2';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { ConfigService } from '@nestjs/config';
 import { UserStatus } from '../../../../generated/prisma';
 import { ErrorCode } from '../../../common/constants/error-codes.constant';
 import { AppException } from '../../../common/exceptions/app.exception';
@@ -14,6 +15,9 @@ import { ZaloLoginDto } from '../dto/zalo-login.dto';
 import type { ZaloAuthProvider } from '../providers/zalo-auth-provider.interface';
 import { ZALO_AUTH_PROVIDER } from '../providers/zalo-auth.token';
 import { TokenService } from './token.service';
+import { PasswordResetMailService } from './password-reset-mail.service';
+import type { AuthConfig } from '../../../config/auth.config';
+import type { ResetPasswordDto } from '../dto/reset-password.dto';
 
 export interface RequestMeta {
   userAgent?: string;
@@ -27,6 +31,8 @@ export class AuthService {
     private readonly sessionService: SessionService,
     private readonly tokenService: TokenService,
     private readonly auditLogService: AuditLogService,
+    private readonly configService: ConfigService,
+    private readonly passwordResetMailService: PasswordResetMailService,
     @Inject(ZALO_AUTH_PROVIDER)
     private readonly zaloAuthProvider: ZaloAuthProvider,
   ) {}
@@ -101,9 +107,11 @@ export class AuthService {
     });
 
     const user = await this.userService.getProfile(rotated.userId);
+    this.assertActive(user);
     const accessToken = await this.tokenService.signAccessToken({
       sub: user.id,
       role: user.role,
+      cv: user.credentialVersion,
     });
 
     return {
@@ -139,6 +147,47 @@ export class AuthService {
     });
   }
 
+  async requestPasswordReset(email: string): Promise<void> {
+    const authConfig = this.configService.getOrThrow<AuthConfig>('auth');
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = this.hashResetToken(token);
+    const expiresAt = new Date(
+      Date.now() + authConfig.passwordResetTtlMinutes * 60_000,
+    );
+    const destination = await this.userService.createPasswordResetTokenForEmail(
+      {
+        email,
+        tokenHash,
+        expiresAt,
+      },
+    );
+    if (destination) {
+      await this.passwordResetMailService.send(destination, token);
+    }
+  }
+
+  async resetPassword(dto: ResetPasswordDto): Promise<void> {
+    if (dto.newPassword !== dto.newPasswordConfirmation) {
+      throw new AppException(
+        ErrorCode.PASSWORD_CONFIRMATION_MISMATCH,
+        'Xác nhận mật khẩu mới không trùng khớp',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const passwordHash = await argon2.hash(dto.newPassword);
+    const consumed = await this.userService.resetPasswordWithToken({
+      tokenHash: this.hashResetToken(dto.token),
+      passwordHash,
+    });
+    if (!consumed) {
+      throw new AppException(
+        ErrorCode.INVALID_PASSWORD_RESET_TOKEN,
+        'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
   private async issueTokens(
     user: UserEntity,
     meta: RequestMeta,
@@ -166,6 +215,7 @@ export class AuthService {
     const accessToken = await this.tokenService.signAccessToken({
       sub: user.id,
       role: user.role,
+      cv: user.credentialVersion,
     });
 
     return { accessToken, refreshToken, expiresAt };
@@ -187,5 +237,9 @@ export class AuthService {
       'Email hoặc mật khẩu không đúng',
       HttpStatus.UNAUTHORIZED,
     );
+  }
+
+  private hashResetToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 }

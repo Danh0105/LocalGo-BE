@@ -3,6 +3,7 @@ import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import {
   BusinessApplicantType,
   BusinessApplicationStatus,
+  BusinessType,
 } from '../../../../generated/prisma';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
@@ -16,6 +17,11 @@ export class QueryBusinessApplicationsDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(BusinessApplicantType)
   applicantType?: BusinessApplicantType;
+
+  @ApiPropertyOptional({ enum: BusinessType })
+  @IsOptional()
+  @IsEnum(BusinessType)
+  businessType?: BusinessType;
 
   @ApiPropertyOptional()
   @IsOptional()

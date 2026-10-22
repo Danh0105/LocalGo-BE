@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { TempleTypeLabel } from '../temple.constants';
+import { MapLocationResponseDto } from '../../../common/dto/map-location-response.dto';
 
 export class TempleEventResponseDto {
   @ApiProperty()
@@ -24,6 +25,16 @@ export class TempleListItemResponseDto {
 
   @ApiProperty()
   address: string;
+
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
+
+  @ApiPropertyOptional({
+    type: MapLocationResponseDto,
+    nullable: true,
+    readOnly: true,
+  })
+  mapLocation: MapLocationResponseDto | null;
 
   @ApiProperty()
   openHours: string;

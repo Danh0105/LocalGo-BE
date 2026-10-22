@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { HistoricalSiteRankLabel } from '../historical-site.constants';
+import { GalleryImageResponseDto } from '../../media/dto/gallery-image-response.dto';
+import { MapLocationResponseDto } from '../../../common/dto/map-location-response.dto';
 
 export class HistoricalSiteListItemResponseDto {
   @ApiProperty()
@@ -13,6 +15,16 @@ export class HistoricalSiteListItemResponseDto {
 
   @ApiProperty()
   address: string;
+
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
+
+  @ApiPropertyOptional({
+    type: MapLocationResponseDto,
+    nullable: true,
+    readOnly: true,
+  })
+  mapLocation: MapLocationResponseDto | null;
 
   @ApiPropertyOptional({ nullable: true })
   recognizedYear: number | null;
@@ -39,11 +51,17 @@ export class HistoricalSiteResponseDto extends HistoricalSiteListItemResponseDto
 
   @ApiProperty({ type: [String] })
   highlights: string[];
+
+  @ApiProperty({ type: [GalleryImageResponseDto] })
+  galleryImages: GalleryImageResponseDto[];
 }
 
 export class HistoricalSiteAdminResponseDto extends HistoricalSiteResponseDto {
   @ApiPropertyOptional({ nullable: true })
   mediaId: string | null;
+
+  @ApiProperty({ type: [String] })
+  galleryMediaIds: string[];
 
   @ApiProperty()
   isActive: boolean;

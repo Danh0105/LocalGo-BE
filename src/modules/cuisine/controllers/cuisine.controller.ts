@@ -3,6 +3,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { Public } from '../../../common/decorators/public.decorator';
+import { mapLocationEtagPart } from '../../../common/utils/map-location-etag.util';
 import { QueryCuisinePublicDto } from '../dto/query-cuisine.dto';
 import {
   CuisineListItemResponseDto,
@@ -38,7 +39,12 @@ export class CuisineController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<CuisineResponseDto | void> {
     const data = await this.service.publicDetail(id);
-    const etag = `"cuisine-${data.id}-${data.updatedAt.getTime()}"`;
+    const etag = `"cuisine-${data.id}-${data.updatedAt.getTime()}-${mapLocationEtagPart(
+      [
+        data.mapLocation,
+        ...data.suggestedPlaceDetails.map((place) => place.mapLocation),
+      ],
+    )}"`;
     response.setHeader('ETag', etag);
     response.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
     if (ifNoneMatch === etag) {

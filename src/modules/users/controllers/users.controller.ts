@@ -1,8 +1,17 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Patch,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.interface';
 import { UpdateProfileDto } from '../dto/update-profile.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 import { UserResponseDto } from '../dto/user-response.dto';
 import { UserService } from '../services/user.service';
 
@@ -29,5 +38,18 @@ export class UsersController {
   ): Promise<UserResponseDto> {
     const entity = await this.userService.updateProfile(user.id, dto);
     return UserResponseDto.fromEntity(entity);
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: '[Chủ vườn] Đổi mật khẩu của chính tài khoản đang đăng nhập',
+  })
+  @Patch('me/password')
+  changeMyPassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePasswordDto,
+  ): Promise<void> {
+    return this.userService.changeGardenOwnerPassword(user.id, dto);
   }
 }

@@ -54,6 +54,7 @@ enum MediaResourceType {
   MAP_PLACE
   CONTACT
   NEWS_ARTICLE
+  HARVEST_BATCH
 }
 
 enum TempleType {
@@ -140,12 +141,31 @@ enum FeedbackTicketStatus {
   CLOSED
 }
 
+enum FeedbackMessageSenderRole {
+  USER
+  ADMIN
+}
+
 enum MapPlaceCategory {
   HANH_CHINH
   DU_LICH
   DI_TICH
   AM_THUC
   DICH_VU
+}
+
+enum MapLocationSource {
+  MAP_PLACE
+  CUISINE
+  TEMPLE
+  HISTORICAL_SITE
+}
+
+enum MapLocationStatus {
+  PENDING
+  RESOLVED
+  UNRESOLVED
+  FAILED
 }
 
 enum ContactCategory {
@@ -169,6 +189,17 @@ enum BusinessApplicantType {
   ORGANIZATION
 }
 
+// Loại hình của tài khoản được đăng tin giao thương. Quyết định form đăng ký
+// (trường + giấy tờ bắt buộc) và loại tin được phép đăng (xem
+// business-type.config.ts).
+enum BusinessType {
+  TEMPLE_MANAGEMENT // Ban quản lý đền/miếu — chỉ đăng tin phi lợi nhuận
+  RESTAURANT // Nhà hàng – quán ăn
+  ACCOMMODATION // Khách sạn – nhà nghỉ – homestay
+  GARDEN // Chủ vườn – nhà vườn
+  GENERAL // Hộ kinh doanh / doanh nghiệp khác
+}
+
 enum BusinessApplicationStatus {
   PENDING
   APPROVED
@@ -181,12 +212,21 @@ enum BusinessDocumentType {
   BUSINESS_LICENSE
   TAX_DOCUMENT
   OTHER
+  MANAGEMENT_DECISION // Văn bản xác nhận / quyết định công nhận Ban quản lý
+  FOOD_SAFETY_CERTIFICATE // Giấy chứng nhận cơ sở đủ điều kiện ATTP
+  SECURITY_CERTIFICATE // Giấy chứng nhận đủ điều kiện về ANTT
+  LAND_USE_CERTIFICATE // Giấy chứng nhận quyền sử dụng đất
 }
 
 enum TradePostPriceType {
   FIXED
   NEGOTIABLE
   CONTACT
+}
+
+enum TradePostPurpose {
+  COMMERCIAL // Có lợi nhuận
+  NON_PROFIT // Phi lợi nhuận — không có giá
 }
 
 enum TradePostStatus {
@@ -213,70 +253,118 @@ enum TradePostEventType {
   SAVE
 }
 
+// Content sections a ContentReview can target (see content-review-targets.ts).
+enum ContentReviewTargetType {
+  TEMPLE
+  SPECIALTY
+  HISTORICAL_SITE
+  AGRICULTURE
+  CRAFT_VILLAGE
+  CUISINE
+  FESTIVAL
+  EXPERIENCE_TOUR
+}
+
+enum ContentReviewStatus {
+  PUBLISHED
+  HIDDEN
+}
+
 // ---------- Core / Auth ----------
 
 model User {
-  id           String     @id @default(uuid())
-  zaloId       String?    @unique
-  phone        String?    @unique
-  email        String?    @unique
-  displayName  String
-  avatarUrl    String?
-  passwordHash String?
-  role         UserRole   @default(USER)
-  status       UserStatus @default(ACTIVE)
-  lastLoginAt  DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  deletedAt    DateTime?
+  id                String        @id @default(uuid())
+  zaloId            String?       @unique
+  phone             String?       @unique
+  email             String?       @unique
+  displayName       String
+  avatarUrl         String?
+  passwordHash      String?
+  // Incremented whenever password credentials are changed/reset/disabled.
+  // Access tokens carry this value so previously issued tokens are rejected.
+  credentialVersion Int           @default(0)
+  role              UserRole      @default(USER)
+  // Set when a business application is approved; null = GENERAL.
+  businessType      BusinessType?
+  status            UserStatus    @default(ACTIVE)
+  lastLoginAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  deletedAt         DateTime?
 
   authSessions                  AuthSession[]
-  tradePostsOwned               TradePost[]           @relation("TradePostOwner")
-  tradePostsApproved            TradePost[]           @relation("TradePostApprover")
+  passwordResetTokens           PasswordResetToken[]
+  tradePostsOwned               TradePost[]                @relation("TradePostOwner")
+  tradePostsApproved            TradePost[]                @relation("TradePostApprover")
   tradeReviews                  TradeReview[]
+  tradeReviewCustomerReplies    TradeReviewCustomerReply[] @relation("TradeReviewCustomerReplyAuthor")
+  contentReviews                ContentReview[]
+  contentReviewsReplied         ContentReview[]            @relation("ContentReviewReplier")
   mediaUploads                  Media[]
   auditLogs                     AuditLog[]
-  businessApplicationsSubmitted BusinessApplication[] @relation("BusinessApplicationSubmitter")
-  businessApplicationsReviewed  BusinessApplication[] @relation("BusinessApplicationReviewer")
-  businessApplicationAccount    BusinessApplication?  @relation("BusinessApplicationAccount")
-  aboutPagesCreated             AboutPage[]           @relation("AboutPageCreator")
-  aboutPagesUpdated             AboutPage[]           @relation("AboutPageUpdater")
-  aboutPagesPublished           AboutPage[]           @relation("AboutPagePublisher")
-  aboutRevisionsPublished       AboutRevision[]       @relation("AboutRevisionPublisher")
-  templesCreated                Temple[]              @relation("TempleCreator")
-  templesUpdated                Temple[]              @relation("TempleUpdater")
-  specialtiesCreated            Specialty[]           @relation("SpecialtyCreator")
-  specialtiesUpdated            Specialty[]           @relation("SpecialtyUpdater")
-  historicalSitesCreated        HistoricalSite[]      @relation("HistoricalSiteCreator")
-  historicalSitesUpdated        HistoricalSite[]      @relation("HistoricalSiteUpdater")
-  agricultureItemsCreated       AgricultureItem[]     @relation("AgricultureItemCreator")
-  agricultureItemsUpdated       AgricultureItem[]     @relation("AgricultureItemUpdater")
-  ocopProductsCreated           OcopProduct[]         @relation("OcopProductCreator")
-  ocopProductsUpdated           OcopProduct[]         @relation("OcopProductUpdater")
-  craftVillagesCreated          CraftVillage[]        @relation("CraftVillageCreator")
-  craftVillagesUpdated          CraftVillage[]        @relation("CraftVillageUpdater")
-  cuisineItemsCreated           CuisineItem[]         @relation("CuisineItemCreator")
-  cuisineItemsUpdated           CuisineItem[]         @relation("CuisineItemUpdater")
-  festivalsCreated              Festival[]            @relation("FestivalCreator")
-  festivalsUpdated              Festival[]            @relation("FestivalUpdater")
-  experienceToursCreated        ExperienceTour[]      @relation("ExperienceTourCreator")
-  experienceToursUpdated        ExperienceTour[]      @relation("ExperienceTourUpdater")
-  feedbackChannelsCreated       FeedbackChannel[]     @relation("FeedbackChannelCreator")
-  feedbackChannelsUpdated       FeedbackChannel[]     @relation("FeedbackChannelUpdater")
-  feedbackTicketsHandled        FeedbackTicket[]      @relation("FeedbackTicketHandler")
-  feedbackTicketsSubmitted      FeedbackTicket[]      @relation("FeedbackTicketSubmitter")
-  mapPlacesCreated              MapPlace[]            @relation("MapPlaceCreator")
-  mapPlacesUpdated              MapPlace[]            @relation("MapPlaceUpdater")
-  contactsCreated               Contact[]             @relation("ContactCreator")
-  contactsUpdated               Contact[]             @relation("ContactUpdater")
-  newsArticlesCreated           NewsArticle[]         @relation("NewsArticleCreator")
-  newsArticlesUpdated           NewsArticle[]         @relation("NewsArticleUpdater")
-  tradePostCategoriesCreated    TradePostCategory[]   @relation("TradePostCategoryCreator")
-  tradePostCategoriesUpdated    TradePostCategory[]   @relation("TradePostCategoryUpdater")
-  tradePostEvents               TradePostEvent[]      @relation("TradePostEventUser")
+  businessApplicationsSubmitted BusinessApplication[]      @relation("BusinessApplicationSubmitter")
+  businessApplicationsReviewed  BusinessApplication[]      @relation("BusinessApplicationReviewer")
+  businessApplicationAccount    BusinessApplication?       @relation("BusinessApplicationAccount")
+  businessProfile               BusinessProfile?
+  aboutPagesCreated             AboutPage[]                @relation("AboutPageCreator")
+  aboutPagesUpdated             AboutPage[]                @relation("AboutPageUpdater")
+  aboutPagesPublished           AboutPage[]                @relation("AboutPagePublisher")
+  aboutRevisionsPublished       AboutRevision[]            @relation("AboutRevisionPublisher")
+  templesCreated                Temple[]                   @relation("TempleCreator")
+  templesUpdated                Temple[]                   @relation("TempleUpdater")
+  specialtiesCreated            Specialty[]                @relation("SpecialtyCreator")
+  specialtiesUpdated            Specialty[]                @relation("SpecialtyUpdater")
+  historicalSitesCreated        HistoricalSite[]           @relation("HistoricalSiteCreator")
+  historicalSitesUpdated        HistoricalSite[]           @relation("HistoricalSiteUpdater")
+  agricultureItemsCreated       AgricultureItem[]          @relation("AgricultureItemCreator")
+  agricultureItemsUpdated       AgricultureItem[]          @relation("AgricultureItemUpdater")
+  ocopProductsCreated           OcopProduct[]              @relation("OcopProductCreator")
+  ocopProductsUpdated           OcopProduct[]              @relation("OcopProductUpdater")
+  craftVillagesCreated          CraftVillage[]             @relation("CraftVillageCreator")
+  craftVillagesUpdated          CraftVillage[]             @relation("CraftVillageUpdater")
+  cuisineItemsCreated           CuisineItem[]              @relation("CuisineItemCreator")
+  cuisineItemsUpdated           CuisineItem[]              @relation("CuisineItemUpdater")
+  festivalsCreated              Festival[]                 @relation("FestivalCreator")
+  festivalsUpdated              Festival[]                 @relation("FestivalUpdater")
+  experienceToursCreated        ExperienceTour[]           @relation("ExperienceTourCreator")
+  experienceToursUpdated        ExperienceTour[]           @relation("ExperienceTourUpdater")
+  feedbackChannelsCreated       FeedbackChannel[]          @relation("FeedbackChannelCreator")
+  feedbackChannelsUpdated       FeedbackChannel[]          @relation("FeedbackChannelUpdater")
+  feedbackTicketsHandled        FeedbackTicket[]           @relation("FeedbackTicketHandler")
+  feedbackTicketsSubmitted      FeedbackTicket[]           @relation("FeedbackTicketSubmitter")
+  feedbackMessagesSent          FeedbackMessage[]          @relation("FeedbackMessageSender")
+  mapPlacesCreated              MapPlace[]                 @relation("MapPlaceCreator")
+  mapPlacesUpdated              MapPlace[]                 @relation("MapPlaceUpdater")
+  contactsCreated               Contact[]                  @relation("ContactCreator")
+  contactsUpdated               Contact[]                  @relation("ContactUpdater")
+  newsArticlesCreated           NewsArticle[]              @relation("NewsArticleCreator")
+  newsArticlesUpdated           NewsArticle[]              @relation("NewsArticleUpdater")
+  tradePostCategoriesCreated    TradePostCategory[]        @relation("TradePostCategoryCreator")
+  tradePostCategoriesUpdated    TradePostCategory[]        @relation("TradePostCategoryUpdater")
+  tradePostEvents               TradePostEvent[]           @relation("TradePostEventUser")
   savedTradePosts               SavedTradePost[]
+  tradeConversationsAsCustomer  TradeConversation[]        @relation("TradeConversationCustomer")
+  tradeConversationsAsOwner     TradeConversation[]        @relation("TradeConversationOwner")
+  tradeMessagesSent             TradeMessage[]             @relation("TradeMessageSender")
+  notifications                 Notification[]
+  harvestBatches                HarvestBatch[]
 
   @@index([role])
+}
+
+// Opaque, single-use forgot-password tokens. Only a SHA-256 digest is stored;
+// the plaintext token exists briefly while it is delivered out-of-band.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, usedAt])
+  @@index([expiresAt])
 }
 
 // Refresh-token rotation with reuse detection: one row per issuance,
@@ -352,21 +440,33 @@ model Media {
 
   tradePostImages              TradePostImage[]
   tradeReviewImages            TradeReviewImage[]
+  contentReviewImages          ContentReviewImage[]
   businessApplicationDocuments BusinessApplicationDocument[]
   temples                      Temple[]
   specialties                  Specialty[]
+  specialtyImages              SpecialtyImage[]
   historicalSites              HistoricalSite[]
+  historicalSiteImages         HistoricalSiteImage[]
   agricultureItems             AgricultureItem[]
+  agricultureItemImages        AgricultureItemImage[]
   ocopProducts                 OcopProduct[]
   craftVillages                CraftVillage[]
+  craftVillageImages           CraftVillageImage[]
   cuisineItems                 CuisineItem[]
+  cuisineItemImages            CuisineItemImage[]
   festivals                    Festival[]
+  festivalImages               FestivalImage[]
   experienceTours              ExperienceTour[]
+  experienceTourImages         ExperienceTourImage[]
   feedbackChannels             FeedbackChannel[]
   mapPlaces                    MapPlace[]
   contacts                     Contact[]
+  contactImages                ContactImage[]
   newsArticles                 NewsArticle[]
+  newsArticleImages            NewsArticleImage[]
   feedbackTicketMedia          FeedbackTicketMedia[]
+  feedbackMessageMedia         FeedbackMessageMedia[]
+  harvestBatchImages           HarvestBatchImage[]
 
   @@index([ownerId])
   @@index([resourceType, resourceId])
@@ -376,22 +476,23 @@ model Media {
 // ---------- Tourist points: temples / pagodas / shrines ----------
 
 model Temple {
-  id          String     @id
-  name        String     @db.VarChar(150)
-  type        TempleType
-  address     String     @db.VarChar(255)
-  openHours   String     @db.VarChar(100)
-  summary     String     @db.VarChar(300)
-  description Json
-  mediaId     String?
-  imageAlt    String     @default("") @db.VarChar(150)
-  sortOrder   Int        @default(0)
-  isActive    Boolean    @default(true)
-  version     Int        @default(1)
-  createdById String?
-  updatedById String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  id            String     @id
+  name          String     @db.VarChar(150)
+  type          TempleType
+  address       String     @db.VarChar(255)
+  googleMapsUrl String     @default("") @db.VarChar(2048)
+  openHours     String     @db.VarChar(100)
+  summary       String     @db.VarChar(300)
+  description   Json
+  mediaId       String?
+  imageAlt      String     @default("") @db.VarChar(150)
+  sortOrder     Int        @default(0)
+  isActive      Boolean    @default(true)
+  version       Int        @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   media     Media?        @relation(fields: [mediaId], references: [id], onDelete: SetNull)
   createdBy User?         @relation("TempleCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -420,33 +521,49 @@ model TempleEvent {
 // ---------- Specialties: local food / fruit / gift products ----------
 
 model Specialty {
-  id          String            @id
-  name        String            @db.VarChar(150)
-  category    SpecialtyCategory
-  price       String            @db.VarChar(100)
-  season      String            @db.VarChar(100)
-  summary     String            @db.VarChar(300)
-  description Json
-  buyPlaces   Json
-  mediaId     String?
-  imageAlt    String            @default("") @db.VarChar(150)
-  sortOrder   Int               @default(0)
-  isActive    Boolean           @default(true)
-  version     Int               @default(1)
-  createdById String?
-  updatedById String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  deletedAt   DateTime?
+  id            String            @id
+  name          String            @db.VarChar(150)
+  category      SpecialtyCategory
+  price         String            @db.VarChar(100)
+  season        String            @db.VarChar(100)
+  summary       String            @db.VarChar(300)
+  description   Json
+  buyPlaces     Json
+  // Kept for migration compatibility; per-place links live in buyPlaces JSON.
+  googleMapsUrl String            @default("") @db.VarChar(2048)
+  mediaId       String?
+  imageAlt      String            @default("") @db.VarChar(150)
+  sortOrder     Int               @default(0)
+  isActive      Boolean           @default(true)
+  version       Int               @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  deletedAt     DateTime?
 
-  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  createdBy User?  @relation("SpecialtyCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("SpecialtyUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  media         Media?           @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  galleryImages SpecialtyImage[]
+  createdBy     User?            @relation("SpecialtyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?            @relation("SpecialtyUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, sortOrder, createdAt])
   @@index([category, isActive, sortOrder])
   @@index([name])
   @@index([deletedAt])
+}
+
+model SpecialtyImage {
+  id          String    @id @default(uuid())
+  specialtyId String
+  specialty   Specialty @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+  mediaId     String
+  media       Media     @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@unique([specialtyId, mediaId])
+  @@index([specialtyId, sortOrder])
 }
 
 // ---------- Historical sites: di tích lịch sử ----------
@@ -456,6 +573,7 @@ model HistoricalSite {
   name           String             @db.VarChar(150)
   rank           HistoricalSiteRank
   address        String             @db.VarChar(255)
+  googleMapsUrl  String             @default("") @db.VarChar(2048)
   recognizedYear Int?
   summary        String             @db.VarChar(300)
   history        Json
@@ -470,71 +588,101 @@ model HistoricalSite {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
-  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  createdBy User?  @relation("HistoricalSiteCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("HistoricalSiteUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  media         Media?                @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  galleryImages HistoricalSiteImage[]
+  createdBy     User?                 @relation("HistoricalSiteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?                 @relation("HistoricalSiteUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, sortOrder, createdAt])
   @@index([rank, isActive, sortOrder])
   @@index([name])
 }
 
+model HistoricalSiteImage {
+  id               String         @id @default(uuid())
+  historicalSiteId String
+  historicalSite   HistoricalSite @relation(fields: [historicalSiteId], references: [id], onDelete: Cascade)
+  mediaId          String
+  media            Media          @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder        Int            @default(0)
+  createdAt        DateTime       @default(now())
+
+  @@unique([historicalSiteId, mediaId])
+  @@index([historicalSiteId, sortOrder])
+}
+
 // ---------- Agriculture: nông nghiệp ----------
 
 model AgricultureItem {
-  id          String              @id
-  name        String              @db.VarChar(150)
-  category    AgricultureCategory
-  location    String              @db.VarChar(255)
-  season      String              @db.VarChar(150)
-  scale       String              @db.VarChar(150)
-  summary     String              @db.VarChar(300)
-  description Json
-  highlights  Json
-  support     String              @db.VarChar(2000)
-  mediaId     String?
-  imageAlt    String              @default("") @db.VarChar(150)
-  sortOrder   Int                 @default(0)
-  isActive    Boolean             @default(true)
-  version     Int                 @default(1)
-  createdById String?
-  updatedById String?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  id            String              @id
+  name          String              @db.VarChar(150)
+  category      AgricultureCategory
+  location      String              @db.VarChar(255)
+  googleMapsUrl String              @default("") @db.VarChar(2048)
+  season        String              @db.VarChar(150)
+  scale         String              @db.VarChar(150)
+  summary       String              @db.VarChar(300)
+  description   Json
+  highlights    Json
+  support       String              @db.VarChar(2000)
+  mediaId       String?
+  imageAlt      String              @default("") @db.VarChar(150)
+  sortOrder     Int                 @default(0)
+  isActive      Boolean             @default(true)
+  version       Int                 @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 
-  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  createdBy User?  @relation("AgricultureItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("AgricultureItemUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  media         Media?                 @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  galleryImages AgricultureItemImage[]
+  createdBy     User?                  @relation("AgricultureItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?                  @relation("AgricultureItemUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, sortOrder, createdAt])
   @@index([category, isActive, sortOrder])
   @@index([name])
 }
 
+model AgricultureItemImage {
+  id                String          @id @default(uuid())
+  agricultureItemId String
+  agricultureItem   AgricultureItem @relation(fields: [agricultureItemId], references: [id], onDelete: Cascade)
+  mediaId           String
+  media             Media           @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder         Int             @default(0)
+  createdAt         DateTime        @default(now())
+
+  @@unique([agricultureItemId, mediaId])
+  @@index([agricultureItemId, sortOrder])
+}
+
 // ---------- OCOP: One Commune One Product ----------
 
 model OcopProduct {
-  id           String       @id
-  name         String       @db.VarChar(150)
-  category     OcopCategory
-  rating       OcopRating
-  producer     String       @db.VarChar(150)
-  address      String       @db.VarChar(255)
-  priceRange   String       @db.VarChar(100)
-  summary      String       @db.VarChar(300)
-  description  Json
-  highlights   Json
-  contactNote  String       @db.VarChar(2000)
-  contactPhone String?      @db.VarChar(30)
-  mediaId      String?
-  imageAlt     String       @default("") @db.VarChar(150)
-  sortOrder    Int          @default(0)
-  isActive     Boolean      @default(true)
-  version      Int          @default(1)
-  createdById  String?
-  updatedById  String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id            String       @id
+  name          String       @db.VarChar(150)
+  category      OcopCategory
+  rating        OcopRating
+  producer      String       @db.VarChar(150)
+  address       String       @db.VarChar(255)
+  googleMapsUrl String       @default("") @db.VarChar(2048)
+  priceRange    String       @db.VarChar(100)
+  summary       String       @db.VarChar(300)
+  description   Json
+  highlights    Json
+  contactNote   String       @db.VarChar(2000)
+  contactPhone  String?      @db.VarChar(30)
+  mediaId       String?
+  imageAlt      String       @default("") @db.VarChar(150)
+  sortOrder     Int          @default(0)
+  isActive      Boolean      @default(true)
+  version       Int          @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
   createdBy User?  @relation("OcopProductCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -549,33 +697,48 @@ model OcopProduct {
 // ---------- Craft villages: làng nghề ----------
 
 model CraftVillage {
-  id           String               @id
-  name         String               @db.VarChar(150)
-  category     CraftVillageCategory
-  address      String               @db.VarChar(255)
-  workingTime  String               @db.VarChar(100)
-  mainProducts String               @db.VarChar(255)
-  summary      String               @db.VarChar(300)
-  description  Json
-  highlights   Json
-  visitorNote  String               @db.VarChar(2000)
-  mediaId      String?
-  imageAlt     String               @default("") @db.VarChar(150)
-  sortOrder    Int                  @default(0)
-  isActive     Boolean              @default(true)
-  version      Int                  @default(1)
-  createdById  String?
-  updatedById  String?
-  createdAt    DateTime             @default(now())
-  updatedAt    DateTime             @updatedAt
+  id            String               @id
+  name          String               @db.VarChar(150)
+  category      CraftVillageCategory
+  address       String               @db.VarChar(255)
+  googleMapsUrl String               @default("") @db.VarChar(2048)
+  workingTime   String               @db.VarChar(100)
+  mainProducts  String               @db.VarChar(255)
+  summary       String               @db.VarChar(300)
+  description   Json
+  highlights    Json
+  visitorNote   String               @db.VarChar(2000)
+  mediaId       String?
+  imageAlt      String               @default("") @db.VarChar(150)
+  sortOrder     Int                  @default(0)
+  isActive      Boolean              @default(true)
+  version       Int                  @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
 
-  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  createdBy User?  @relation("CraftVillageCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("CraftVillageUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  media         Media?              @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  galleryImages CraftVillageImage[]
+  createdBy     User?               @relation("CraftVillageCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?               @relation("CraftVillageUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, sortOrder, createdAt])
   @@index([category, isActive, sortOrder])
   @@index([name])
+}
+
+model CraftVillageImage {
+  id             String       @id @default(uuid())
+  craftVillageId String
+  craftVillage   CraftVillage @relation(fields: [craftVillageId], references: [id], onDelete: Cascade)
+  mediaId        String
+  media          Media        @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+
+  @@unique([craftVillageId, mediaId])
+  @@index([craftVillageId, sortOrder])
 }
 
 // ---------- Cuisine: ẩm thực ----------
@@ -586,11 +749,15 @@ model CuisineItem {
   category        CuisineCategory
   priceRange      String          @db.VarChar(100)
   bestTime        String          @db.VarChar(100)
+  googleMapsUrl   String          @default("") @db.VarChar(2048)
   suggestedPlaces Json
   summary         String          @db.VarChar(300)
   description     Json
   highlights      Json
   tip             String          @db.VarChar(2000)
+  contactPhone    String          @default("") @db.VarChar(30)
+  menu            Json            @default("[]")
+  reviews         Json            @default("[]")
   mediaId         String?
   imageAlt        String          @default("") @db.VarChar(150)
   sortOrder       Int             @default(0)
@@ -601,78 +768,122 @@ model CuisineItem {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  createdBy User?  @relation("CuisineItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("CuisineItemUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  media         Media?             @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  galleryImages CuisineItemImage[]
+  createdBy     User?              @relation("CuisineItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?              @relation("CuisineItemUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, sortOrder, createdAt])
   @@index([category, isActive, sortOrder])
   @@index([name])
+}
+
+model CuisineItemImage {
+  id            String      @id @default(uuid())
+  cuisineItemId String
+  cuisineItem   CuisineItem @relation(fields: [cuisineItemId], references: [id], onDelete: Cascade)
+  mediaId       String
+  media         Media       @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+
+  @@unique([cuisineItemId, mediaId])
+  @@index([cuisineItemId, sortOrder])
 }
 
 // ---------- Festivals: lễ hội ----------
 
 model Festival {
-  id          String           @id
-  name        String           @db.VarChar(150)
-  category    FestivalCategory
-  time        String           @db.VarChar(150)
-  location    String           @db.VarChar(255)
-  scale       String           @db.VarChar(100)
-  summary     String           @db.VarChar(300)
-  description Json
-  activities  Json
-  note        String           @db.VarChar(2000)
-  mediaId     String?
-  imageAlt    String           @default("") @db.VarChar(150)
-  sortOrder   Int              @default(0)
-  isActive    Boolean          @default(true)
-  version     Int              @default(1)
-  createdById String?
-  updatedById String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id            String           @id
+  name          String           @db.VarChar(150)
+  category      FestivalCategory
+  time          String           @db.VarChar(150)
+  location      String           @db.VarChar(255)
+  googleMapsUrl String           @default("") @db.VarChar(2048)
+  scale         String           @db.VarChar(100)
+  summary       String           @db.VarChar(300)
+  description   Json
+  activities    Json
+  note          String           @db.VarChar(2000)
+  mediaId       String?
+  imageAlt      String           @default("") @db.VarChar(150)
+  sortOrder     Int              @default(0)
+  isActive      Boolean          @default(true)
+  version       Int              @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
-  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  createdBy User?  @relation("FestivalCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("FestivalUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  media         Media?          @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  galleryImages FestivalImage[]
+  createdBy     User?           @relation("FestivalCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?           @relation("FestivalUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, sortOrder, createdAt])
   @@index([category, isActive, sortOrder])
   @@index([name])
 }
 
-model ExperienceTour {
-  id           String                 @id
-  name         String                 @db.VarChar(150)
-  category     ExperienceTourCategory
-  duration     String                 @db.VarChar(100)
-  startTime    String                 @db.VarChar(100)
-  priceRange   String                 @db.VarChar(100)
-  meetingPoint String                 @db.VarChar(255)
-  summary      String                 @db.VarChar(300)
-  description  Json
-  itinerary    Json
-  included     Json
-  note         String                 @db.VarChar(2000)
-  contactPhone String?                @db.VarChar(30)
-  mediaId      String?
-  imageAlt     String                 @default("") @db.VarChar(150)
-  sortOrder    Int                    @default(0)
-  isActive     Boolean                @default(true)
-  version      Int                    @default(1)
-  createdById  String?
-  updatedById  String?
-  createdAt    DateTime               @default(now())
-  updatedAt    DateTime               @updatedAt
+model FestivalImage {
+  id         String   @id @default(uuid())
+  festivalId String
+  festival   Festival @relation(fields: [festivalId], references: [id], onDelete: Cascade)
+  mediaId    String
+  media      Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
 
-  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  createdBy User?  @relation("ExperienceTourCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("ExperienceTourUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  @@unique([festivalId, mediaId])
+  @@index([festivalId, sortOrder])
+}
+
+model ExperienceTour {
+  id            String                 @id
+  name          String                 @db.VarChar(150)
+  category      ExperienceTourCategory
+  duration      String                 @db.VarChar(100)
+  startTime     String                 @db.VarChar(100)
+  priceRange    String                 @db.VarChar(100)
+  meetingPoint  String                 @db.VarChar(255)
+  googleMapsUrl String                 @default("") @db.VarChar(2048)
+  summary       String                 @db.VarChar(300)
+  description   Json
+  itinerary     Json
+  included      Json
+  note          String                 @db.VarChar(2000)
+  contactPhone  String?                @db.VarChar(30)
+  mediaId       String?
+  imageAlt      String                 @default("") @db.VarChar(150)
+  sortOrder     Int                    @default(0)
+  isActive      Boolean                @default(true)
+  version       Int                    @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  media         Media?                @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  galleryImages ExperienceTourImage[]
+  createdBy     User?                 @relation("ExperienceTourCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?                 @relation("ExperienceTourUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, sortOrder, createdAt])
   @@index([category, isActive, sortOrder])
   @@index([name])
+}
+
+model ExperienceTourImage {
+  id               String         @id @default(uuid())
+  experienceTourId String
+  experienceTour   ExperienceTour @relation(fields: [experienceTourId], references: [id], onDelete: Cascade)
+  mediaId          String
+  media            Media          @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder        Int            @default(0)
+  createdAt        DateTime       @default(now())
+
+  @@unique([experienceTourId, mediaId])
+  @@index([experienceTourId, sortOrder])
 }
 
 // ---------- Phản hồi ----------
@@ -708,24 +919,25 @@ model FeedbackChannel {
 }
 
 model FeedbackTicket {
-  id            String               @id @default(uuid())
-  ticketCode    String               @unique
+  id            String                    @id @default(uuid())
+  ticketCode    String                    @unique
   channelId     String?
-  fullName      String               @db.VarChar(150)
-  phone         String               @db.VarChar(30)
-  content       String               @db.VarChar(5000)
-  status        FeedbackTicketStatus @default(NEW)
-  adminNote     String?              @db.VarChar(2000)
+  fullName      String                    @db.VarChar(150)
+  phone         String                    @db.VarChar(30)
+  content       String                    @db.VarChar(5000)
+  status        FeedbackTicketStatus      @default(NEW)
+  adminNote     String?                   @db.VarChar(2000)
   handledById   String?
   submittedById String?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
   resolvedAt    DateTime?
-
-  channel     FeedbackChannel?      @relation(fields: [channelId], references: [id], onDelete: SetNull)
-  handledBy   User?                 @relation("FeedbackTicketHandler", fields: [handledById], references: [id], onDelete: SetNull)
-  submittedBy User?                 @relation("FeedbackTicketSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
-  media       FeedbackTicketMedia[]
+  readStates    FeedbackTicketReadState[]
+  channel       FeedbackChannel?          @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  handledBy     User?                     @relation("FeedbackTicketHandler", fields: [handledById], references: [id], onDelete: SetNull)
+  submittedBy   User?                     @relation("FeedbackTicketSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
+  media         FeedbackTicketMedia[]
+  messages      FeedbackMessage[]
 
   @@index([status, createdAt])
   @@index([channelId])
@@ -750,6 +962,39 @@ model FeedbackTicketMedia {
   @@index([ticketId, sortOrder])
 }
 
+// Immutable two-way conversation between the feedback sender and admins.
+// Anonymous senders have senderUserId=null; access remains protected by the
+// ticketCode + phone pair used by the ticket lookup API.
+model FeedbackMessage {
+  id           String                    @id @default(uuid())
+  ticketId     String
+  ticket       FeedbackTicket            @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderRole   FeedbackMessageSenderRole
+  senderUserId String?
+  senderUser   User?                     @relation("FeedbackMessageSender", fields: [senderUserId], references: [id], onDelete: SetNull)
+  // 5000 preserves legacy ticket content when it becomes the first message;
+  // new replies are restricted to 2000 by ReplyFeedbackTicketDto.
+  content      String                    @default("") @db.VarChar(5000)
+  createdAt    DateTime                  @default(now())
+  media        FeedbackMessageMedia[]
+
+  @@index([ticketId, createdAt])
+  @@index([senderUserId])
+}
+
+model FeedbackMessageMedia {
+  id        String          @id @default(uuid())
+  messageId String
+  message   FeedbackMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media           @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder Int             @default(0)
+  createdAt DateTime        @default(now())
+
+  @@unique([messageId, mediaId])
+  @@index([messageId, sortOrder])
+}
+
 // ---------- Bản đồ ----------
 
 model MapPlace {
@@ -757,6 +1002,7 @@ model MapPlace {
   name               String           @db.VarChar(150)
   category           MapPlaceCategory
   address            String           @db.VarChar(255)
+  googleMapsUrl      String           @default("") @db.VarChar(2048)
   lat                Decimal          @db.Decimal(9, 6)
   lng                Decimal          @db.Decimal(9, 6)
   openTime           String           @db.VarChar(150)
@@ -784,6 +1030,32 @@ model MapPlace {
   @@index([name])
 }
 
+// Durable map-location cache and work queue. Associations are polymorphic so
+// cuisine suggested places can use their stable child id without rewriting the
+// parent JSON from a background worker.
+model MapLocationResolution {
+  id            String            @id @default(uuid())
+  source        MapLocationSource
+  sourceId      String            @db.VarChar(191)
+  subId         String            @default("") @db.VarChar(191)
+  googleMapsUrl String            @db.VarChar(2048)
+  urlHash       String            @db.Char(64)
+  status        MapLocationStatus @default(PENDING)
+  lat           Decimal?          @db.Decimal(10, 7)
+  lng           Decimal?          @db.Decimal(10, 7)
+  resolvedAt    DateTime?
+  reasonCode    String?           @db.VarChar(64)
+  attemptCount  Int               @default(0)
+  nextAttemptAt DateTime          @default(now())
+  lockedAt      DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@unique([source, sourceId, subId])
+  @@index([status, nextAttemptAt, lockedAt])
+  @@index([source, sourceId])
+}
+
 // ---------- Liên hệ ----------
 
 model Contact {
@@ -794,6 +1066,7 @@ model Contact {
   phone         String          @db.VarChar(30)
   email         String?         @db.VarChar(255)
   address       String          @db.VarChar(255)
+  googleMapsUrl String          @default("") @db.VarChar(2048)
   workingTime   String          @db.VarChar(150)
   summary       String          @db.VarChar(300)
   description   Json
@@ -809,43 +1082,72 @@ model Contact {
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
-  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  createdBy User?  @relation("ContactCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("ContactUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  media         Media?         @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  galleryImages ContactImage[]
+  createdBy     User?          @relation("ContactCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?          @relation("ContactUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, sortOrder, createdAt])
   @@index([category, isActive, sortOrder])
   @@index([name])
 }
 
+model ContactImage {
+  id        String   @id @default(uuid())
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([contactId, mediaId])
+  @@index([contactId, sortOrder])
+}
+
 // ---------- Tin tức ----------
 
 model NewsArticle {
-  id           String       @id
-  title        String       @db.VarChar(200)
-  category     NewsCategory
-  publishedAt  DateTime
-  author       String       @db.VarChar(150)
-  summary      String       @db.VarChar(300)
-  content      Json
-  tags         Json
-  relatedLinks Json
-  mediaId      String?
-  imageAlt     String       @default("") @db.VarChar(150)
-  isActive     Boolean      @default(true)
-  version      Int          @default(1)
-  createdById  String?
-  updatedById  String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id            String       @id
+  title         String       @db.VarChar(200)
+  category      NewsCategory
+  publishedAt   DateTime
+  author        String       @db.VarChar(150)
+  summary       String       @db.VarChar(300)
+  content       Json
+  tags          Json
+  relatedLinks  Json
+  googleMapsUrl String       @default("") @db.VarChar(2048)
+  mediaId       String?
+  imageAlt      String       @default("") @db.VarChar(150)
+  isActive      Boolean      @default(true)
+  version       Int          @default(1)
+  createdById   String?
+  updatedById   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
-  media     Media? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
-  createdBy User?  @relation("NewsArticleCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  updatedBy User?  @relation("NewsArticleUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  media         Media?             @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  galleryImages NewsArticleImage[]
+  createdBy     User?              @relation("NewsArticleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?              @relation("NewsArticleUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, publishedAt])
   @@index([category, isActive, publishedAt])
   @@index([title])
+}
+
+model NewsArticleImage {
+  id            String      @id @default(uuid())
+  newsArticleId String
+  newsArticle   NewsArticle @relation(fields: [newsArticleId], references: [id], onDelete: Cascade)
+  mediaId       String
+  media         Media       @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+
+  @@unique([newsArticleId, mediaId])
+  @@index([newsArticleId, sortOrder])
 }
 
 // ---------- Business registration ----------
@@ -853,8 +1155,16 @@ model NewsArticle {
 model BusinessApplication {
   id                  String                    @id @default(uuid())
   applicantType       BusinessApplicantType
+  businessType        BusinessType              @default(GENERAL)
   businessName        String
   businessCategory    String
+  // Type-specific details (see business-type.config.ts for which apply).
+  templeName          String?
+  openingHours        String?
+  seatingCapacity     Int?
+  roomCount           Int?
+  gardenArea          String?
+  mainProducts        String?
   contactName         String
   contactPhone        String
   contactEmail        String
@@ -887,6 +1197,7 @@ model BusinessApplication {
 
   @@index([status, createdAt])
   @@index([applicantType])
+  @@index([businessType])
   @@index([contactEmail])
   @@index([taxCode])
   @@index([submittedById, createdAt])
@@ -906,6 +1217,46 @@ model BusinessApplicationDocument {
 
   @@unique([applicationId, mediaId])
   @@index([applicationId])
+}
+
+// Public/operational profile for an approved BUSINESS account. Verification
+// documents and identity data stay in BusinessApplication and are never
+// exposed by these profile endpoints.
+model BusinessProfile {
+  id               String       @id @default(uuid())
+  userId           String       @unique
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessType     BusinessType
+  businessName     String       @db.VarChar(200)
+  businessCategory String       @db.VarChar(120)
+  templeName       String?      @db.VarChar(150)
+  openingHours     String?      @db.VarChar(100)
+  seatingCapacity  Int?
+  roomCount        Int?
+  gardenArea       String?      @db.VarChar(100)
+  mainProducts     String?      @db.VarChar(500)
+  contactName      String       @db.VarChar(120)
+  contactPhone     String       @db.VarChar(30)
+  contactEmail     String       @db.VarChar(254)
+  address          String       @db.VarChar(500)
+  googleMapsUrl    String?      @db.VarChar(2048)
+  lat              Decimal?     @db.Decimal(10, 7)
+  lng              Decimal?     @db.Decimal(10, 7)
+  website          String?      @db.VarChar(500)
+  facebookUrl      String?      @db.VarChar(500)
+  zaloOaUrl        String?      @db.VarChar(500)
+  logoUrl          String?      @db.VarChar(1000)
+  coverImageUrl    String?      @db.VarChar(1000)
+  description      String?      @db.VarChar(3000)
+  isPublic         Boolean      @default(true)
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  @@index([businessType, isPublic, createdAt])
+  @@index([businessName])
+  @@index([deletedAt])
 }
 
 // ---------- About page CMS ----------
@@ -970,53 +1321,62 @@ model TradePostCategory {
 }
 
 model TradePost {
-  id               String             @id @default(uuid())
-  slug             String             @unique
+  id               String              @id @default(uuid())
+  slug             String              @unique
   ownerId          String
-  owner            User               @relation("TradePostOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  owner            User                @relation("TradePostOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   categoryId       String
-  category         TradePostCategory  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  category         TradePostCategory   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   title            String
   summary          String
   description      String
-  priceType        TradePostPriceType
-  price            Decimal?           @db.Decimal(14, 2)
+  purpose          TradePostPurpose    @default(COMMERCIAL)
+  // Null for NON_PROFIT posts, required for COMMERCIAL ones.
+  priceType        TradePostPriceType?
+  price            Decimal?            @db.Decimal(14, 2)
   priceLabel       String?
   address          String
-  lat              Decimal?           @db.Decimal(9, 6)
-  lng              Decimal?           @db.Decimal(9, 6)
+  googleMapsUrl    String?             @db.VarChar(2048)
+  lat              Decimal?            @db.Decimal(9, 6)
+  lng              Decimal?            @db.Decimal(9, 6)
   contactName      String
   contactPhone     String
   contactZalo      String?
   thumbnailUrl     String?
-  status           TradePostStatus    @default(DRAFT)
-  featured         Boolean            @default(false)
+  status           TradePostStatus     @default(DRAFT)
+  featured         Boolean             @default(false)
   promotionPercent Int?
   promotionStartAt DateTime?
   promotionEndAt   DateTime?
+  // NON_PROFIT only: when the promoted event (e.g. a temple festival) runs.
+  // Without an explicit expiresAt the post stops being public at eventEndAt.
+  eventStartAt     DateTime?
+  eventEndAt       DateTime?
   expiresAt        DateTime?
-  viewCount        Int                @default(0)
-  saveCount        Int                @default(0)
-  averageRating    Decimal            @default(0) @db.Decimal(2, 1)
-  reviewCount      Int                @default(0)
+  viewCount        Int                 @default(0)
+  saveCount        Int                 @default(0)
+  averageRating    Decimal             @default(0) @db.Decimal(2, 1)
+  reviewCount      Int                 @default(0)
   publishedAt      DateTime?
   rejectedReason   String?
   approvedById     String?
-  approvedBy       User?              @relation("TradePostApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedBy       User?               @relation("TradePostApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt       DateTime?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
   deletedAt        DateTime?
 
-  images  TradePostImage[]
-  reviews TradeReview[]
-  events  TradePostEvent[]
-  savedBy SavedTradePost[]
+  images        TradePostImage[]
+  reviews       TradeReview[]
+  events        TradePostEvent[]
+  savedBy       SavedTradePost[]
+  conversations TradeConversation[]
 
   @@index([status, publishedAt])
   @@index([ownerId])
   @@index([categoryId])
   @@index([featured])
+  @@index([purpose])
 }
 
 model TradePostImage {
@@ -1035,19 +1395,23 @@ model TradePostImage {
 // ---------- TradeReview ----------
 
 model TradeReview {
-  id          String            @id @default(uuid())
-  tradePostId String
-  tradePost   TradePost         @relation(fields: [tradePostId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User              @relation(fields: [userId], references: [id], onDelete: Restrict)
-  rating      Int
-  content     String            @db.VarChar(500)
-  status      TradeReviewStatus @default(PENDING)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  deletedAt   DateTime?
+  id           String            @id @default(uuid())
+  tradePostId  String
+  tradePost    TradePost         @relation(fields: [tradePostId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  rating       Int
+  content      String            @db.VarChar(500)
+  status       TradeReviewStatus @default(PUBLISHED)
+  // Seller's public reply (the post owner); never edits the customer's content.
+  replyContent String?           @db.VarChar(500)
+  repliedAt    DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  deletedAt    DateTime?
 
-  images TradeReviewImage[]
+  images          TradeReviewImage[]
+  customerReplies TradeReviewCustomerReply[]
 
   // True "one active review per user per post" is enforced via a hand-written
   // Postgres partial unique index (see migrations) — Prisma's schema DSL
@@ -1068,6 +1432,133 @@ model TradeReviewImage {
   createdAt     DateTime    @default(now())
 
   @@unique([tradeReviewId, mediaId])
+}
+
+// Public follow-up messages posted below the seller's reply to a review.
+// The author relation is optional so hard-deleting an account preserves the
+// public conversation history without attributing it to another user.
+model TradeReviewCustomerReply {
+  id        String      @id @default(uuid())
+  reviewId  String
+  review    TradeReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  userId    String?
+  author    User?       @relation("TradeReviewCustomerReplyAuthor", fields: [userId], references: [id], onDelete: SetNull)
+  content   String      @db.VarChar(500)
+  createdAt DateTime    @default(now())
+
+  @@index([reviewId, createdAt, id])
+  @@index([userId])
+}
+
+// ---------- Content reviews (đánh giá điểm đến / nội dung địa phương) ----------
+
+// Star rating + comment a mini app user leaves on a content item (temple,
+// specialty, festival, ...). Polymorphic like MapLocationResolution: targetId
+// is the item's slug id within targetType, so there is no FK — the service
+// checks the target exists and is visible, and each section's remove() purges
+// its reviews (slugs can be reused by a later item).
+model ContentReview {
+  id           String                  @id @default(uuid())
+  targetType   ContentReviewTargetType
+  targetId     String
+  userId       String
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  rating       Int
+  content      String                  @db.VarChar(1000)
+  status       ContentReviewStatus     @default(PUBLISHED)
+  // Official public reply from the admin team; never edits the user's content.
+  replyContent String?                 @db.VarChar(1000)
+  repliedAt    DateTime?
+  repliedById  String?
+  repliedBy    User?                   @relation("ContentReviewReplier", fields: [repliedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  deletedAt    DateTime?
+
+  images ContentReviewImage[]
+
+  // "One active review per user per item" is a hand-written partial unique
+  // index (see migrations), same as TradeReview.
+  @@index([targetType, targetId, status, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ContentReviewImage {
+  id              String        @id @default(uuid())
+  contentReviewId String
+  contentReview   ContentReview @relation(fields: [contentReviewId], references: [id], onDelete: Cascade)
+  mediaId         String
+  media           Media         @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder       Int           @default(0)
+  createdAt       DateTime      @default(now())
+
+  @@unique([contentReviewId, mediaId])
+  @@index([mediaId])
+}
+
+// ---------- Notifications (mini app bell) ----------
+
+// One row per recipient. Broadcasts (e.g. a newly published trade post) are
+// fanned out on write so read state stays per user. `type` is a plain string
+// so new kinds need no migration — see notification-types.ts.
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String    @db.VarChar(64)
+  title     String    @db.VarChar(200)
+  body      String    @db.VarChar(500)
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+// ---------- Trade chat (customer <-> post owner) ----------
+
+// One thread per (post, customer). ownerId is denormalized from the post so
+// the owner's inbox is a single indexed query.
+model TradeConversation {
+  id          String    @id @default(uuid())
+  tradePostId String
+  tradePost   TradePost @relation(fields: [tradePostId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   User   @relation("TradeConversationCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+
+  ownerId String
+  owner   User   @relation("TradeConversationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  lastMessageAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Admin xóa mềm hội thoại
+  deletedAt DateTime?
+
+  messages TradeMessage[]
+
+  @@unique([tradePostId, customerId])
+  @@index([ownerId, lastMessageAt])
+  @@index([customerId, lastMessageAt])
+  @@index([deletedAt])
+}
+
+model TradeMessage {
+  id             String            @id @default(uuid())
+  conversationId String
+  conversation   TradeConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User              @relation("TradeMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  content        String            @db.VarChar(1000)
+  readAt         DateTime?
+  createdAt      DateTime          @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([conversationId, senderId, readAt])
 }
 
 // ---------- Trade analytics / engagement ----------
@@ -1132,4 +1623,60 @@ model AuditLog {
   @@index([actorId])
   @@index([createdAt])
   @@index([action])
+}
+
+model FeedbackTicketReadState {
+  id         Int      @id @default(autoincrement())
+  ticketId   String
+  reader     String
+  lastReadAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  ticket FeedbackTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, reader])
+  @@index([ticketId])
+}
+
+// ---------- Garden harvest traceability ----------
+
+// A harvested lot a garden owner (BUSINESS account, businessType GARDEN)
+// declares from the desktop seller center. The printed QR label links to the
+// public page for `code`; every field is self-declared by the owner.
+model HarvestBatch {
+  id          String    @id @default(uuid())
+  // Short public code encoded in the QR label (no 0/O/1/I to read it aloud).
+  code        String    @unique @db.VarChar(16)
+  ownerId     String
+  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  // Name printed as "Tên chủ vườn" — snapshot, so later account renames don't
+  // change labels already in circulation.
+  ownerName   String    @db.VarChar(120)
+  fruitName   String    @db.VarChar(120)
+  harvestDate DateTime  @db.Date
+  weightKg    Decimal   @db.Decimal(10, 2)
+  pricePerKg  Decimal   @db.Decimal(14, 0)
+  fertilizers String    @db.VarChar(2000)
+  pesticides  String    @db.VarChar(2000)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  images HarvestBatchImage[]
+
+  @@index([ownerId, harvestDate])
+}
+
+model HarvestBatchImage {
+  id             String       @id @default(uuid())
+  harvestBatchId String
+  harvestBatch   HarvestBatch @relation(fields: [harvestBatchId], references: [id], onDelete: Cascade)
+  mediaId        String
+  media          Media        @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+
+  @@unique([harvestBatchId, mediaId])
+  @@index([harvestBatchId, sortOrder])
 }

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { MapPlaceCategoryLabel } from '../map-place.constants';
 import { CoordinatesDto } from './coordinates.dto';
+import { MapLocationResponseDto } from '../../../common/dto/map-location-response.dto';
 
 export class MapPlaceListItemResponseDto {
   @ApiProperty()
@@ -16,6 +17,16 @@ export class MapPlaceListItemResponseDto {
 
   @ApiProperty()
   address: string;
+
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
+
+  @ApiPropertyOptional({
+    type: MapLocationResponseDto,
+    nullable: true,
+    readOnly: true,
+  })
+  mapLocation: MapLocationResponseDto | null;
 
   @ApiProperty({ type: CoordinatesDto })
   coordinates: CoordinatesDto;

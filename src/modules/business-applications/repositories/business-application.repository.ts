@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type {
   BusinessApplicantType,
   BusinessApplicationStatus,
+  BusinessType,
   Prisma,
 } from '../../../../generated/prisma';
 import { PrismaService } from '../../../database/prisma.service';
@@ -49,12 +50,14 @@ export class BusinessApplicationRepository {
     take: number;
     status?: BusinessApplicationStatus;
     applicantType?: BusinessApplicantType;
+    businessType?: BusinessType;
     search?: string;
     sortOrder?: 'asc' | 'desc';
   }): Promise<{ items: BusinessApplicationRecord[]; total: number }> {
     const where: Prisma.BusinessApplicationWhereInput = {
       ...(params.status ? { status: params.status } : {}),
       ...(params.applicantType ? { applicantType: params.applicantType } : {}),
+      ...(params.businessType ? { businessType: params.businessType } : {}),
       ...(params.search
         ? {
             OR: [

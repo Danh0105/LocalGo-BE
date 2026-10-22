@@ -1,5 +1,9 @@
 import { TempleType as PrismaTempleType } from '../../../generated/prisma';
-import { TEMPLE_TYPES, TEMPLE_TYPE_FROM_DB, TEMPLE_TYPE_TO_DB } from './temple.constants';
+import {
+  TEMPLE_TYPES,
+  TEMPLE_TYPE_FROM_DB,
+  TEMPLE_TYPE_TO_DB,
+} from './temple.constants';
 
 describe('temple type mappings', () => {
   it('supports Đền in validation and Prisma mappings', () => {

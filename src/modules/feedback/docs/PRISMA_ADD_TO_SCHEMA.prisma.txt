@@ -1,0 +1,10 @@
+// Add to your existing prisma/schema.prisma, then run prisma migrate dev in development.
+// The admin read state is deliberately shared among administrators of the same ticket.
+model FeedbackTicketReadState {
+  ticketId   String
+  reader     String
+  lastReadAt DateTime @default(now())
+
+  @@id([ticketId, reader])
+  @@index([ticketId, reader, lastReadAt])
+}

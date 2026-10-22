@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  BusinessType,
   Prisma,
+  TradePostPurpose,
   TradePostStatus,
   UserRole,
 } from '../../../../../generated/prisma';
@@ -16,14 +18,33 @@ import { slugify } from '../../../../common/utils/slugify.util';
 import { PrismaService } from '../../../../database/prisma.service';
 import { MediaService } from '../../../media/services/media.service';
 import type { AuthenticatedUser } from '../../../auth/types/authenticated-user.interface';
+import {
+  NotificationType,
+  excerpt,
+} from '../../../notifications/notification-types';
+import { NotificationService } from '../../../notifications/services/notification.service';
+import {
+  BUSINESS_TYPE_CONFIG,
+  allowedPostPurposes,
+} from '../../../business-applications/business-type.config';
 import { TradePostCategoryService } from '../../categories/services/trade-post-category.service';
-import type { TradePostSortOption } from '../../trade.constants';
+import {
+  TRADE_POST_SECTION_BUSINESS_TYPES,
+  TRADE_POST_SECTION_PURPOSES,
+  type TradePostSortOption,
+} from '../../trade.constants';
 import { CreateTradePostDto } from '../dto/create-trade-post.dto';
 import { QueryTradePostDto } from '../dto/query-trade-post.dto';
 import { UpdateTradePostDto } from '../dto/update-trade-post.dto';
 import { TradePostEntity } from '../entities/trade-post.entity';
 import { TradePostRepository } from '../repositories/trade-post.repository';
-import { assertValidTradePostState } from '../utils/trade-post-business-rules.util';
+import {
+  assertEventEndInFuture,
+  assertExpiresAtInFuture,
+  assertValidTradePostState,
+  isPubliclyVisible,
+  notExpiredWhere,
+} from '../utils/trade-post-business-rules.util';
 import { TradePostEngagementService } from './trade-post-engagement.service';
 
 @Injectable()
@@ -34,6 +55,7 @@ export class TradePostService {
     private readonly mediaService: MediaService,
     private readonly categoryService: TradePostCategoryService,
     private readonly engagementService: TradePostEngagementService,
+    private readonly notifications: NotificationService,
   ) {}
 
   async create(
@@ -50,15 +72,31 @@ export class TradePostService {
     const category = await this.categoryService.findActiveByCodeOrThrow(
       dto.category,
     );
+    const purpose = await this.resolvePurpose(currentUser.id, dto.purpose);
+    const isNonProfit = purpose === TradePostPurpose.NON_PROFIT;
+    // Price only applies to commercial posts, event dates only to non-profit ones.
+    const pricing = isNonProfit
+      ? { priceType: null, price: null, priceLabel: null }
+      : {
+          priceType: dto.priceType ?? null,
+          price: dto.price ?? null,
+          priceLabel: dto.priceLabel ?? null,
+        };
+    const eventStartAt = isNonProfit ? (dto.eventStartAt ?? null) : null;
+    const eventEndAt = isNonProfit ? (dto.eventEndAt ?? null) : null;
     assertValidTradePostState({
       categoryCode: category.code,
       requiresPromotionDetails: category.requiresPromotionDetails,
-      priceType: dto.priceType,
-      price: dto.price,
+      purpose,
+      ...pricing,
       promotionPercent: dto.promotionPercent,
       promotionStartAt: dto.promotionStartAt,
       promotionEndAt: dto.promotionEndAt,
+      eventStartAt,
+      eventEndAt,
     });
+    assertExpiresAtInFuture(dto.expiresAt);
+    assertEventEndInFuture(eventEndAt);
 
     const ownerId = currentUser.id;
     const slug = await this.generateUniqueSlug(dto.title);
@@ -88,10 +126,12 @@ export class TradePostService {
           title: dto.title,
           summary: dto.summary,
           description: dto.description,
-          priceType: dto.priceType,
-          price: dto.price ?? null,
-          priceLabel: dto.priceLabel,
+          purpose,
+          ...pricing,
+          eventStartAt: eventStartAt ? new Date(eventStartAt) : null,
+          eventEndAt: eventEndAt ? new Date(eventEndAt) : null,
           address: dto.address,
+          googleMapsUrl: dto.googleMapsUrl || null,
           lat: dto.lat ?? null,
           lng: dto.lng ?? null,
           contactName: dto.contactName,
@@ -156,11 +196,61 @@ export class TradePostService {
         ? await this.categoryService.findActiveByCodeOrThrow(dto.category)
         : existing.category;
 
+    // Validate even when purpose was not changed, so invalid legacy/imported
+    // commercial posts owned by a temple board cannot be edited and re-used.
+    const purpose = await this.resolvePurpose(
+      existing.ownerId,
+      dto.purpose ?? existing.purpose,
+    );
+    const isNonProfit = purpose === TradePostPurpose.NON_PROFIT;
+    // Switching purpose clears what no longer applies: price for non-profit
+    // posts, event dates for commercial ones.
+    const pricingPatch = isNonProfit
+      ? { priceType: null, price: null, priceLabel: null }
+      : {
+          ...(dto.priceType !== undefined ? { priceType: dto.priceType } : {}),
+          ...(dto.price !== undefined ? { price: dto.price } : {}),
+          ...(dto.priceLabel !== undefined
+            ? { priceLabel: dto.priceLabel }
+            : {}),
+        };
+    const eventPatch = isNonProfit
+      ? {
+          ...(dto.eventStartAt !== undefined
+            ? {
+                eventStartAt: dto.eventStartAt
+                  ? new Date(dto.eventStartAt)
+                  : null,
+              }
+            : {}),
+          ...(dto.eventEndAt !== undefined
+            ? { eventEndAt: dto.eventEndAt ? new Date(dto.eventEndAt) : null }
+            : {}),
+        }
+      : { eventStartAt: null, eventEndAt: null };
+
     assertValidTradePostState({
       categoryCode: finalCategory.code,
       requiresPromotionDetails: finalCategory.requiresPromotionDetails,
-      priceType: dto.priceType ?? existing.priceType,
-      price: dto.price !== undefined ? dto.price : existing.price,
+      purpose,
+      priceType: isNonProfit
+        ? null
+        : dto.priceType !== undefined
+          ? dto.priceType
+          : existing.priceType,
+      price: isNonProfit
+        ? null
+        : dto.price !== undefined
+          ? dto.price
+          : existing.price,
+      eventStartAt:
+        eventPatch.eventStartAt !== undefined
+          ? eventPatch.eventStartAt
+          : existing.eventStartAt,
+      eventEndAt:
+        eventPatch.eventEndAt !== undefined
+          ? eventPatch.eventEndAt
+          : existing.eventEndAt,
       promotionPercent:
         dto.promotionPercent !== undefined
           ? dto.promotionPercent
@@ -174,9 +264,14 @@ export class TradePostService {
           ? dto.promotionEndAt
           : existing.promotionEndAt,
     });
+    assertExpiresAtInFuture(dto.expiresAt);
+    if (isNonProfit) {
+      assertEventEndInFuture(dto.eventEndAt);
+    }
 
     const existingPriceNumber = existing.price ? Number(existing.price) : null;
     const substantiveFieldsChanged =
+      purpose !== existing.purpose ||
       (dto.title !== undefined && dto.title !== existing.title) ||
       (dto.description !== undefined &&
         dto.description !== existing.description) ||
@@ -244,12 +339,13 @@ export class TradePostService {
           ...(dto.description !== undefined
             ? { description: dto.description }
             : {}),
-          ...(dto.priceType !== undefined ? { priceType: dto.priceType } : {}),
-          ...(dto.price !== undefined ? { price: dto.price } : {}),
-          ...(dto.priceLabel !== undefined
-            ? { priceLabel: dto.priceLabel }
-            : {}),
+          purpose,
+          ...pricingPatch,
+          ...eventPatch,
           ...(dto.address !== undefined ? { address: dto.address } : {}),
+          ...(dto.googleMapsUrl !== undefined
+            ? { googleMapsUrl: dto.googleMapsUrl || null }
+            : {}),
           ...(dto.lat !== undefined ? { lat: dto.lat } : {}),
           ...(dto.lng !== undefined ? { lng: dto.lng } : {}),
           ...(dto.contactName !== undefined
@@ -279,7 +375,7 @@ export class TradePostService {
               }
             : {}),
           ...(dto.expiresAt !== undefined
-            ? { expiresAt: new Date(dto.expiresAt) }
+            ? { expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null }
             : {}),
           ...(thumbnailUrl !== undefined ? { thumbnailUrl } : {}),
           ...(shouldRevertToPending ? { status: TradePostStatus.PENDING } : {}),
@@ -293,7 +389,55 @@ export class TradePostService {
       await this.mediaService.purgeStorage(deletedMediaIds);
     }
 
+    if (shouldRevertToPending) {
+      await this.notifications.notifyStaff({
+        type: NotificationType.TRADE_POST_SUBMITTED,
+        title: 'Tin giao thương được cập nhật',
+        body: `${currentUser.displayName} vừa cập nhật tin "${excerpt(updated.title, 90)}"; tin đang chờ duyệt lại.`,
+        data: {
+          tradePostId: updated.id,
+          slug: updated.slug,
+          submittedById: currentUser.id,
+        },
+      });
+    }
+
     return this.getDetailEntityOrThrow(updated.id);
+  }
+
+  /**
+   * Purpose for a post owned by `ownerId`: the requested one if the owner's
+   * business type allows it, otherwise the type's default (temple management
+   * boards only publish non-profit posts).
+   */
+  private async resolvePurpose(
+    ownerId: string,
+    requested: TradePostPurpose | undefined,
+  ): Promise<TradePostPurpose> {
+    const owner = await this.prisma.user.findUnique({
+      where: { id: ownerId },
+      select: { businessType: true },
+    });
+    const allowed = allowedPostPurposes(owner?.businessType);
+    if (requested === undefined) {
+      return allowed.includes(TradePostPurpose.COMMERCIAL)
+        ? TradePostPurpose.COMMERCIAL
+        : allowed[0];
+    }
+    if (!allowed.includes(requested)) {
+      throw new AppException(
+        ErrorCode.TRADE_POST_PURPOSE_NOT_ALLOWED,
+        `Tài khoản ${BUSINESS_TYPE_CONFIG[owner?.businessType ?? BusinessType.GENERAL].label} chỉ được đăng tin ${allowed
+          .map((value) =>
+            value === TradePostPurpose.NON_PROFIT
+              ? 'phi lợi nhuận'
+              : 'có lợi nhuận',
+          )
+          .join(' hoặc ')}`,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    return requested;
   }
 
   async remove(currentUser: AuthenticatedUser, id: string): Promise<void> {
@@ -309,15 +453,13 @@ export class TradePostService {
     await this.tradePostRepository.softDelete(id);
   }
 
-  async getPublicDetail(idOrSlug: string): Promise<TradePostEntity> {
+  /** `viewerId` (optional) attributes the recorded view to a signed-in user. */
+  async getPublicDetail(
+    idOrSlug: string,
+    viewerId?: string,
+  ): Promise<TradePostEntity> {
     const post = await this.tradePostRepository.findDetailBySlugOrId(idOrSlug);
-    if (
-      !post ||
-      post.status !== TradePostStatus.PUBLISHED ||
-      !post.category.isActive ||
-      post.category.deletedAt !== null ||
-      (post.expiresAt && post.expiresAt.getTime() <= Date.now())
-    ) {
+    if (!post || !isPubliclyVisible(post)) {
       throw new AppException(
         ErrorCode.RESOURCE_NOT_FOUND,
         'Không tìm thấy tin đăng',
@@ -325,7 +467,7 @@ export class TradePostService {
       );
     }
     await this.tradePostRepository.incrementViewCount(post.id);
-    await this.engagementService.recordView(post.id);
+    await this.engagementService.recordView(post.id, viewerId);
     return new TradePostEntity(post);
   }
 
@@ -352,9 +494,7 @@ export class TradePostService {
     conditions.push({ deletedAt: null });
     conditions.push({ status: TradePostStatus.PUBLISHED });
     conditions.push({ category: { isActive: true, deletedAt: null } });
-    conditions.push({
-      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-    });
+    conditions.push(notExpiredWhere());
 
     return this.list(query, { AND: conditions });
   }
@@ -370,7 +510,8 @@ export class TradePostService {
       conditions.push({ status: query.status });
     }
 
-    return this.list(query, { AND: conditions });
+    // Own posts include drafts (no publishedAt), so "newest" means newest created.
+    return this.list(query, { AND: conditions }, 'createdAt');
   }
 
   async listForAdmin(
@@ -387,7 +528,7 @@ export class TradePostService {
       skip,
       take,
       where: { AND: conditions },
-      orderBy: this.buildOrderBy(query.sortBy ?? 'newest'),
+      orderBy: this.buildOrderBy(query.sortBy ?? 'newest', query.sortOrder),
     });
     return paginate(
       items.map((item) => new TradePostEntity(item)),
@@ -400,13 +541,18 @@ export class TradePostService {
   private async list(
     query: QueryTradePostDto,
     where: Prisma.TradePostWhereInput,
+    newestBy: 'publishedAt' | 'createdAt' = 'publishedAt',
   ): Promise<PaginatedResultDto<TradePostEntity>> {
     const { skip, take } = buildPaginationArgs(query.page, query.limit);
     const { items, total } = await this.tradePostRepository.findList({
       skip,
       take,
       where,
-      orderBy: this.buildOrderBy(query.sortBy ?? 'newest'),
+      orderBy: this.buildOrderBy(
+        query.sortBy ?? 'newest',
+        query.sortOrder,
+        newestBy,
+      ),
     });
     return paginate(
       items.map((item) => new TradePostEntity(item)),
@@ -431,6 +577,20 @@ export class TradePostService {
     if (query.featured !== undefined) {
       conditions.push({ featured: query.featured });
     }
+    if (query.purpose) {
+      conditions.push({ purpose: query.purpose });
+    }
+    if (query.section) {
+      const purposes = TRADE_POST_SECTION_PURPOSES[query.section];
+      conditions.push({
+        owner: {
+          businessType: {
+            in: TRADE_POST_SECTION_BUSINESS_TYPES[query.section],
+          },
+        },
+      });
+      if (purposes) conditions.push({ purpose: { in: purposes } });
+    }
     if (query.ownerId) {
       conditions.push({ ownerId: query.ownerId });
     }
@@ -452,21 +612,30 @@ export class TradePostService {
     return conditions;
   }
 
+  /**
+   * `sortOrder` (default desc) flips newest/rating/popular; price_asc and
+   * price_desc carry their own direction.
+   */
   private buildOrderBy(
     sortBy: TradePostSortOption,
+    sortOrder: Prisma.SortOrder = 'desc',
+    newestBy: 'publishedAt' | 'createdAt' = 'publishedAt',
   ): Prisma.TradePostOrderByWithRelationInput[] {
     switch (sortBy) {
+      // Posts without a price (non-profit, negotiable, contact) sort last either way.
       case 'price_asc':
-        return [{ price: 'asc' }];
+        return [{ price: { sort: 'asc', nulls: 'last' } }];
       case 'price_desc':
-        return [{ price: 'desc' }];
+        return [{ price: { sort: 'desc', nulls: 'last' } }];
       case 'rating':
-        return [{ averageRating: 'desc' }, { reviewCount: 'desc' }];
+        return [{ averageRating: sortOrder }, { reviewCount: sortOrder }];
       case 'popular':
-        return [{ viewCount: 'desc' }];
+        return [{ viewCount: sortOrder }];
       case 'newest':
       default:
-        return [{ publishedAt: 'desc' }, { createdAt: 'desc' }];
+        return newestBy === 'createdAt'
+          ? [{ createdAt: sortOrder }]
+          : [{ publishedAt: sortOrder }, { createdAt: sortOrder }];
     }
   }
 

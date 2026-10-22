@@ -42,7 +42,16 @@ describe('Specialties (e2e)', () => {
       season: 'Quanh năm',
       summary: 'Nội dung tóm tắt dùng cho kiểm thử tích hợp.',
       description: ['Đoạn mô tả kiểm thử.'],
-      buyPlaces: ['Chợ kiểm thử'],
+      buyPlaceDetails: [
+        {
+          id: 'cho-kiem-thu',
+          name: 'Chợ kiểm thử',
+          address: 'Địa chỉ kiểm thử',
+          googleMapsUrl: 'https://maps.app.goo.gl/cho-kiem-thu',
+          phone: '0900 123 456',
+          email: 'cho@example.com',
+        },
+      ],
       mediaId: null,
       imageAlt: 'Đặc Sản Kiểm Thử',
       isActive: true,
@@ -205,6 +214,155 @@ describe('Specialties (e2e)', () => {
         .expect(404);
       expect(response.body.error.code).toBe('SPECIALTY_NOT_FOUND');
     }
+  });
+
+  it('parses legacy buyPlaces strings and returns the compatibility names', async () => {
+    const response = await request(app.getHttpServer())
+      .get(`/api/v1/specialties/${ids.first}`)
+      .expect(200);
+
+    expect(response.body.data.buyPlaces).toEqual(['Nơi bán A']);
+    expect(response.body.data.buyPlaceDetails).toEqual([
+      {
+        id: 'noi-ban-a',
+        name: 'Nơi bán A',
+        address: '',
+        googleMapsUrl: '',
+        phone: '',
+        email: '',
+      },
+    ]);
+  });
+
+  it('creates and updates structured buy places with maps and contacts', async () => {
+    const admin = await login('buy-places-admin', UserRole.ADMIN);
+    const places = [
+      {
+        id: 'cho-a',
+        name: 'Chợ A',
+        address: 'Địa chỉ A',
+        googleMapsUrl: 'https://maps.app.goo.gl/cho-a',
+        phone: '+84 900 111 222',
+        email: 'cho-a@example.com',
+      },
+      {
+        id: 'cua-hang-b',
+        name: 'Cửa hàng B',
+        address: 'Địa chỉ B',
+        googleMapsUrl: 'https://www.google.com/maps/place/cua-hang-b',
+        phone: '',
+        email: '',
+      },
+    ];
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/admin/specialties')
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(
+        body({ id: `${prefix}-structured-places`, buyPlaceDetails: places }),
+      )
+      .expect(201);
+    expect(created.body.data.buyPlaceDetails).toEqual(places);
+    expect(created.body.data.buyPlaces).toEqual(['Chợ A', 'Cửa hàng B']);
+
+    const reordered = [places[1], places[0]];
+    const updated = await request(app.getHttpServer())
+      .put(`/api/v1/admin/specialties/${prefix}-structured-places`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(body({ version: 1, buyPlaceDetails: reordered }))
+      .expect(200);
+    expect(updated.body.data.buyPlaceDetails).toEqual(reordered);
+  });
+
+  it('accepts legacy buyPlaces only for an inactive draft', async () => {
+    const admin = await login('legacy-buy-places-admin', UserRole.ADMIN);
+    const payload: Record<string, unknown> = body({
+      id: `${prefix}-legacy-places`,
+      isActive: false,
+      buyPlaces: ['Chợ legacy'],
+    });
+    delete payload.buyPlaceDetails;
+
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/admin/specialties')
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send(payload)
+      .expect(201);
+    expect(created.body.data.buyPlaceDetails).toEqual([
+      {
+        id: 'cho-legacy',
+        name: 'Chợ legacy',
+        address: '',
+        googleMapsUrl: '',
+        phone: '',
+        email: '',
+      },
+    ]);
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/admin/specialties/${prefix}-legacy-places/status`)
+      .set('Authorization', `Bearer ${admin.token}`)
+      .send({ isActive: true, version: 1 })
+      .expect(400);
+  });
+
+  it('rejects invalid maps, phone, email and duplicate place ids', async () => {
+    const admin = await login('buy-place-validation-admin', UserRole.ADMIN);
+    const authorization = { Authorization: `Bearer ${admin.token}` };
+    const invalidPlaces = [
+      {
+        id: 'bad-map',
+        name: 'Sai bản đồ',
+        googleMapsUrl: 'javascript:alert(1)',
+      },
+      {
+        id: 'bad-phone',
+        name: 'Sai điện thoại',
+        googleMapsUrl: 'https://maps.app.goo.gl/bad-phone',
+        phone: '0900-abc',
+      },
+      {
+        id: 'bad-email',
+        name: 'Sai email',
+        googleMapsUrl: 'https://maps.app.goo.gl/bad-email',
+        email: 'khong-phai-email',
+      },
+    ];
+
+    for (const [index, place] of invalidPlaces.entries()) {
+      await request(app.getHttpServer())
+        .post('/api/v1/admin/specialties')
+        .set(authorization)
+        .send(
+          body({
+            id: `${prefix}-invalid-place-${index}`,
+            isActive: false,
+            buyPlaceDetails: [place],
+          }),
+        )
+        .expect(400);
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/specialties')
+      .set(authorization)
+      .send(
+        body({
+          id: `${prefix}-duplicate-place`,
+          buyPlaceDetails: [
+            {
+              id: 'trung',
+              name: 'Địa điểm A',
+              googleMapsUrl: 'https://maps.app.goo.gl/a',
+            },
+            {
+              id: 'trung',
+              name: 'Địa điểm B',
+              googleMapsUrl: 'https://maps.app.goo.gl/b',
+            },
+          ],
+        }),
+      )
+      .expect(400);
   });
 
   it('protects all admin endpoints by authentication and role', async () => {

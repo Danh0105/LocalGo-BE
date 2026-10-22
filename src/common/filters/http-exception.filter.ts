@@ -29,20 +29,37 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+
     const requestId =
       this.requestContext.getRequestId() ??
       (request.headers['x-request-id'] as string | undefined);
+
+    // Tránh gửi response lần thứ hai nếu headers đã được gửi.
+    if (response.headersSent || response.writableEnded) {
+      this.logger.warn(
+        `Response already sent: ${request.method} ${request.originalUrl} ` +
+          `(requestId=${requestId ?? 'unknown'})`,
+      );
+
+      // Ghi lại lỗi gốc để phục vụ điều tra.
+      if (exception instanceof Error) {
+        this.logger.error(exception.message, exception.stack);
+      }
+
+      return;
+    }
 
     const resolved = this.resolve(exception);
 
     if (resolved.status >= Number(HttpStatus.INTERNAL_SERVER_ERROR)) {
       this.logger.error(
-        `${request.method} ${request.originalUrl} -> ${resolved.status} ${resolved.code}`,
+        `${request.method} ${request.originalUrl} -> ` +
+          `${resolved.status} ${resolved.code}`,
         exception instanceof Error ? exception.stack : undefined,
       );
     }
 
-    response.status(resolved.status).json({
+    const payload = {
       success: false,
       error: {
         code: resolved.code,
@@ -50,12 +67,22 @@ export class HttpExceptionFilter implements ExceptionFilter {
         details: resolved.details ?? [],
       },
       requestId,
-    });
+    };
+
+    // Kiểm tra một lần nữa trước khi trả HTTP response.
+    if (response.headersSent || response.writableEnded) {
+      return;
+    }
+
+    response.status(resolved.status).json(payload);
   }
 
   private resolve(exception: unknown): ResolvedError {
     if (exception instanceof AppException) {
-      const body = exception.getResponse() as { message: string };
+      const body = exception.getResponse() as {
+        message: string;
+      };
+
       return {
         status: exception.getStatus(),
         code: exception.code,
@@ -84,12 +111,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const body = exception.getResponse();
 
     if (typeof body === 'object' && body !== null) {
-      const b = body as { message?: string | string[]; error?: string };
+      const b = body as {
+        message?: string | string[];
+        error?: string;
+      };
+
       const messages = Array.isArray(b.message)
         ? b.message
         : b.message
           ? [b.message]
           : [];
+
       return {
         status,
         code: this.mapStatusToCode(status),
@@ -117,17 +149,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
           code: ErrorCode.RESOURCE_ALREADY_EXISTS,
           message: 'Dữ liệu đã tồn tại',
         };
+
       case 'P2025':
         return {
           status: HttpStatus.NOT_FOUND,
           code: ErrorCode.RESOURCE_NOT_FOUND,
           message: 'Không tìm thấy dữ liệu',
         };
+
       default:
         this.logger.error(
           `Unhandled Prisma error: ${exception.code}`,
           exception.message,
         );
+
         return {
           status: HttpStatus.INTERNAL_SERVER_ERROR,
           code: ErrorCode.INTERNAL_ERROR,
@@ -140,14 +175,22 @@ export class HttpExceptionFilter implements ExceptionFilter {
     switch (status) {
       case Number(HttpStatus.BAD_REQUEST):
         return ErrorCode.VALIDATION_ERROR;
+
       case Number(HttpStatus.UNAUTHORIZED):
         return ErrorCode.UNAUTHORIZED;
+
       case Number(HttpStatus.FORBIDDEN):
         return ErrorCode.FORBIDDEN;
+
       case Number(HttpStatus.NOT_FOUND):
         return ErrorCode.RESOURCE_NOT_FOUND;
+
       case Number(HttpStatus.CONFLICT):
         return ErrorCode.RESOURCE_ALREADY_EXISTS;
+
+      case Number(HttpStatus.TOO_MANY_REQUESTS):
+        return ErrorCode.RATE_LIMIT_EXCEEDED;
+
       default:
         return ErrorCode.INTERNAL_ERROR;
     }

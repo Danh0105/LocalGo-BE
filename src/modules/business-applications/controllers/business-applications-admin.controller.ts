@@ -1,10 +1,22 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '../../../../generated/prisma';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../../auth/types/authenticated-user.interface';
-import { BusinessApplicationResponseDto } from '../dto/business-application-response.dto';
+import { ApproveBusinessApplicationDto } from '../dto/approve-business-application.dto';
+import {
+  ApproveBusinessApplicationResponseDto,
+  BusinessApplicationResponseDto,
+} from '../dto/business-application-response.dto';
 import { QueryBusinessApplicationsDto } from '../dto/query-business-applications.dto';
 import { RejectBusinessApplicationDto } from '../dto/reject-business-application.dto';
 import { BusinessApplicationService } from '../services/business-application.service';
@@ -29,15 +41,20 @@ export class BusinessApplicationsAdminController {
   }
 
   @Post(':id/approve')
+  @Header('Cache-Control', 'no-store, private')
   @ApiOperation({
-    summary: '[Admin] Duyệt hồ sơ và nâng tài khoản Zalo thành BUSINESS',
+    summary:
+      '[Admin] Duyệt hồ sơ, tạo/nâng tài khoản BUSINESS và tự sinh mật khẩu ban đầu',
   })
   async approve(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('id') id: string,
+    @Body() dto: ApproveBusinessApplicationDto,
   ) {
-    return BusinessApplicationResponseDto.fromEntity(
-      await this.service.approve(actor.id, id),
+    const result = await this.service.approve(actor.id, id, dto);
+    return ApproveBusinessApplicationResponseDto.fromApproval(
+      result.application,
+      result.initialPassword,
     );
   }
 

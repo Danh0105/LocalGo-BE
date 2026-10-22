@@ -3,6 +3,7 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { Public } from '../../../common/decorators/public.decorator';
+import { mapLocationEtagPart } from '../../../common/utils/map-location-etag.util';
 import { QueryTemplePublicDto } from '../dto/query-temple.dto';
 import {
   TempleListItemResponseDto,
@@ -38,7 +39,7 @@ export class TemplesController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<TempleResponseDto | void> {
     const data = await this.service.publicDetail(id);
-    const etag = `"temple-${data.id}-${data.updatedAt.getTime()}"`;
+    const etag = `"temple-${data.id}-${data.updatedAt.getTime()}-${mapLocationEtagPart([data.mapLocation])}"`;
     response.setHeader('ETag', etag);
     response.setHeader('Cache-Control', 'public, max-age=60, must-revalidate');
     if (ifNoneMatch === etag) {

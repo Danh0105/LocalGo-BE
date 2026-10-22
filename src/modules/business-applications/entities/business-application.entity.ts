@@ -2,6 +2,7 @@ import type {
   BusinessApplicantType,
   BusinessApplicationStatus,
   BusinessDocumentType,
+  BusinessType,
 } from '../../../../generated/prisma';
 import type { BusinessApplicationRecord } from '../repositories/business-application.repository';
 
@@ -16,8 +17,15 @@ export interface BusinessApplicationDocumentView {
 export class BusinessApplicationEntity {
   id: string;
   applicantType: BusinessApplicantType;
+  businessType: BusinessType;
   businessName: string;
   businessCategory: string;
+  templeName: string | null;
+  openingHours: string | null;
+  seatingCapacity: number | null;
+  roomCount: number | null;
+  gardenArea: string | null;
+  mainProducts: string | null;
   contactName: string;
   contactPhone: string;
   contactEmail: string;
@@ -49,8 +57,15 @@ export class BusinessApplicationEntity {
   ) {
     this.id = record.id;
     this.applicantType = record.applicantType;
+    this.businessType = record.businessType;
     this.businessName = record.businessName;
     this.businessCategory = record.businessCategory;
+    this.templeName = record.templeName;
+    this.openingHours = record.openingHours;
+    this.seatingCapacity = record.seatingCapacity;
+    this.roomCount = record.roomCount;
+    this.gardenArea = record.gardenArea;
+    this.mainProducts = record.mainProducts;
     this.contactName = record.contactName;
     this.contactPhone = record.contactPhone;
     this.contactEmail = record.contactEmail;

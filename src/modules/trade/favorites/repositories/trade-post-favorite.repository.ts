@@ -23,6 +23,19 @@ export class TradePostFavoriteRepository {
     });
   }
 
+  /** Which of `tradePostIds` the user has saved (one query for a whole list page). */
+  async findSavedPostIds(
+    userId: string,
+    tradePostIds: string[],
+  ): Promise<Set<string>> {
+    if (tradePostIds.length === 0) return new Set();
+    const rows = await this.prisma.savedTradePost.findMany({
+      where: { userId, tradePostId: { in: tradePostIds } },
+      select: { tradePostId: true },
+    });
+    return new Set(rows.map((row) => row.tradePostId));
+  }
+
   async create(
     userId: string,
     tradePostId: string,

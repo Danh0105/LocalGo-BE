@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../../../../../generated/prisma';
 import { PrismaService } from '../../../../database/prisma.service';
+import { notExpiredWhere } from '../utils/trade-post-business-rules.util';
 import type {
   TradePostWithCategory,
   TradePostWithImages,
@@ -27,6 +28,7 @@ const OWNER_SELECT = {
   phone: true,
   avatarUrl: true,
   role: true,
+  businessType: true,
   status: true,
 } satisfies Prisma.UserSelect;
 
@@ -69,7 +71,7 @@ export class TradePostRepository {
         OR: [{ id: idOrSlug }, { slug: idOrSlug }],
         status: 'PUBLISHED',
         category: { isActive: true, deletedAt: null },
-        AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+        AND: [notExpiredWhere()],
       },
       select: { id: true },
     });

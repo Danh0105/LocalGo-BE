@@ -40,11 +40,16 @@ export class MediaController {
     if (!file) {
       throw new BadRequestException('Không có file được tải lên');
     }
-    const media = await this.mediaService.uploadImage({
-      ownerId: user.id,
-      buffer: file.buffer,
-    });
-    return MediaResponseDto.fromEntity(media);
+    const buffer = file.buffer;
+    try {
+      const media = await this.mediaService.uploadImage({
+        ownerId: user.id,
+        buffer,
+      });
+      return MediaResponseDto.fromEntity(media);
+    } finally {
+      file.buffer = Buffer.alloc(0);
+    }
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -75,14 +80,21 @@ export class MediaController {
       throw new BadRequestException('Không có file nào được tải lên');
     }
 
-    const media = await Promise.all(
-      files.map((file) =>
-        this.mediaService.uploadImage({
+    const result: MediaResponseDto[] = [];
+    for (const file of files) {
+      const buffer = file.buffer;
+      try {
+        const media = await this.mediaService.uploadImage({
           ownerId: user.id,
-          buffer: file.buffer,
-        }),
-      ),
-    );
-    return media.map((item) => MediaResponseDto.fromEntity(item));
+          buffer,
+        });
+        result.push(MediaResponseDto.fromEntity(media));
+      } finally {
+        // The batch interceptor keeps the File objects until the request ends.
+        // Drop each raw upload as soon as its Sharp pipeline has completed.
+        file.buffer = Buffer.alloc(0);
+      }
+    }
+    return result;
   }
 }

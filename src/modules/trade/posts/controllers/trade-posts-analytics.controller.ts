@@ -2,6 +2,7 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../auth/types/authenticated-user.interface';
+import { SellerAccess } from '../../common/seller-access.guard';
 import { QueryTradePostAnalyticsDto } from '../dto/query-trade-post-analytics.dto';
 import {
   TradePostAnalyticsDetailDto,
@@ -15,6 +16,7 @@ import { TradePostAnalyticsService } from '../services/trade-post-analytics.serv
 export class TradePostAnalyticsController {
   constructor(private readonly analyticsService: TradePostAnalyticsService) {}
 
+  @SellerAccess()
   @ApiOperation({
     summary: 'Thống kê truy cập & tương tác tổng hợp cho các tin của tôi',
   })
@@ -26,6 +28,7 @@ export class TradePostAnalyticsController {
     return this.analyticsService.getOwnerSummary(user, query);
   }
 
+  @SellerAccess({ allowStaff: true })
   @ApiOperation({
     summary: 'Thống kê truy cập & tương tác của một tin (chủ tin hoặc admin)',
   })

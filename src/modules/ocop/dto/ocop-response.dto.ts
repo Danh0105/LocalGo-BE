@@ -22,6 +22,9 @@ export class OcopListItemResponseDto {
   @ApiProperty()
   address: string;
 
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
+
   @ApiProperty()
   priceRange: string;
 

@@ -4,6 +4,7 @@ import {
   Prisma,
   type Media,
   type Specialty,
+  type SpecialtyImage,
   type User,
 } from '../../../../generated/prisma';
 import { ErrorCode } from '../../../common/constants/error-codes.constant';
@@ -27,21 +28,31 @@ import {
 } from '../dto/specialty-response.dto';
 import {
   CreateSpecialtyDto,
+  type SpecialtyContentDto,
   UpdateSpecialtyDto,
 } from '../dto/upsert-specialty.dto';
 import {
   SPECIALTY_CATEGORY_FROM_DB,
   SPECIALTY_CATEGORY_TO_DB,
 } from '../specialty.constants';
+import {
+  parseBuyPlaceDetails,
+  type SpecialtyBuyPlace,
+} from '../utils/buy-place.util';
 
 type SpecialtyRecord = Specialty & {
   media: Media | null;
+  galleryImages: Array<SpecialtyImage & { media: Media }>;
   createdBy: Pick<User, 'displayName'> | null;
   updatedBy: Pick<User, 'displayName'> | null;
 };
 
 const includeSpecialty = {
   media: true,
+  galleryImages: {
+    orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }],
+    include: { media: true },
+  },
   createdBy: { select: { displayName: true } },
   updatedBy: { select: { displayName: true } },
 };
@@ -116,7 +127,17 @@ export class SpecialtyService {
     dto: CreateSpecialtyDto,
   ): Promise<SpecialtyAdminResponseDto> {
     const id = await this.resolveCreateId(dto);
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds = dto.galleryMediaIds ?? [];
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.SPECIALTY,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_SPECIALTY_MEDIA,
+    });
+    const places = this.resolveBuyPlaces(dto, id);
+    this.assertBuyPlacesForActive(dto.isActive ?? true, places);
 
     const record = await this.prisma.$transaction(async (tx) => {
       const sortOrder = dto.sortOrder ?? (await this.nextSortOrder(tx));
@@ -129,17 +150,33 @@ export class SpecialtyService {
           season: dto.season,
           summary: dto.summary,
           description: dto.description,
-          buyPlaces: dto.buyPlaces,
+          buyPlaces: places as unknown as Prisma.InputJsonValue,
           mediaId: dto.mediaId ?? null,
           imageAlt: dto.imageAlt,
           sortOrder,
           isActive: dto.isActive ?? true,
           createdById: actorId,
           updatedById: actorId,
+          ...(galleryMediaIds.length === 0
+            ? {}
+            : {
+                galleryImages: {
+                  create: galleryMediaIds.map((mediaId, index) => ({
+                    mediaId,
+                    sortOrder: index,
+                  })),
+                },
+              }),
         },
         include: includeSpecialty,
       });
-      await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.mediaService.claimContentImageSet(tx, {
+        mediaIds: [dto.mediaId, ...galleryMediaIds],
+        actorId,
+        resourceType: MediaResourceType.SPECIALTY,
+        resourceId: id,
+        errorCode: ErrorCode.INVALID_SPECIALTY_MEDIA,
+      });
       await tx.auditLog.create({
         data: {
           actorId,
@@ -183,9 +220,21 @@ export class SpecialtyService {
     dto: UpdateSpecialtyDto,
   ): Promise<SpecialtyAdminResponseDto> {
     const current = await this.findOrThrow(id);
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds =
+      dto.galleryMediaIds ??
+      current.galleryImages.map((image) => image.mediaId);
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.SPECIALTY,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_SPECIALTY_MEDIA,
+    });
+    const places = this.resolveBuyPlaces(dto, id);
+    this.assertBuyPlacesForActive(dto.isActive ?? current.isActive, places);
 
-    const { record, deletedMediaId } = await this.prisma.$transaction(
+    const { record, deletedMediaIds } = await this.prisma.$transaction(
       async (tx) => {
         const updated = await tx.specialty.updateMany({
           where: { id, version: dto.version, deletedAt: null },
@@ -196,7 +245,7 @@ export class SpecialtyService {
             season: dto.season,
             summary: dto.summary,
             description: dto.description,
-            buyPlaces: dto.buyPlaces,
+            buyPlaces: places as unknown as Prisma.InputJsonValue,
             mediaId: dto.mediaId ?? null,
             imageAlt: dto.imageAlt,
             ...(dto.sortOrder === undefined
@@ -209,16 +258,36 @@ export class SpecialtyService {
         });
         if (updated.count !== 1) throw await this.versionConflict(tx, id);
 
-        const deletedMediaId = await this.mediaService.releaseSingularMedia(
+        if (dto.galleryMediaIds !== undefined) {
+          await tx.specialtyImage.deleteMany({ where: { specialtyId: id } });
+          if (galleryMediaIds.length > 0)
+            await tx.specialtyImage.createMany({
+              data: galleryMediaIds.map((mediaId, index) => ({
+                specialtyId: id,
+                mediaId,
+                sortOrder: index,
+              })),
+            });
+        }
+        await this.mediaService.claimContentImageSet(tx, {
+          mediaIds: [dto.mediaId, ...galleryMediaIds],
+          actorId,
+          resourceType: MediaResourceType.SPECIALTY,
+          resourceId: id,
+          errorCode: ErrorCode.INVALID_SPECIALTY_MEDIA,
+        });
+        const deletedMediaIds = await this.mediaService.releaseContentImageSet(
           tx,
           {
-            previousMediaId: current.mediaId,
-            nextMediaId: dto.mediaId ?? null,
+            previousMediaIds: [
+              current.mediaId,
+              ...current.galleryImages.map((image) => image.mediaId),
+            ],
+            nextMediaIds: [dto.mediaId, ...galleryMediaIds],
             resourceType: MediaResourceType.SPECIALTY,
             resourceId: id,
           },
         );
-        await this.claimMedia(tx, dto.mediaId, actorId, id);
         await tx.auditLog.create({
           data: {
             actorId,
@@ -233,10 +302,10 @@ export class SpecialtyService {
           where: { id },
           include: includeSpecialty,
         });
-        return { record, deletedMediaId };
+        return { record, deletedMediaIds };
       },
     );
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
     return this.toAdminDto(record);
   }
 
@@ -245,6 +314,13 @@ export class SpecialtyService {
     id: string,
     dto: UpdateSpecialtyStatusDto,
   ): Promise<SpecialtyAdminResponseDto> {
+    if (dto.isActive) {
+      const current = await this.findOrThrow(id);
+      this.assertBuyPlacesForActive(
+        true,
+        parseBuyPlaceDetails(current.buyPlaces, id),
+      );
+    }
     const record = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.specialty.updateMany({
         where: { id, version: dto.version, deletedAt: null },
@@ -366,10 +442,18 @@ export class SpecialtyService {
   }
 
   private toPublicDto(record: SpecialtyRecord): SpecialtyResponseDto {
+    const places = parseBuyPlaceDetails(record.buyPlaces, record.id);
     return {
       ...this.toListDto(record),
       description: this.readStringArray(record.description),
-      buyPlaces: this.readStringArray(record.buyPlaces),
+      buyPlaces: places.map((place) => place.name),
+      buyPlaceDetails: places,
+      galleryImages: record.galleryImages.map((image) => ({
+        mediaId: image.mediaId,
+        imageUrl: image.media.originalUrl,
+        thumbnailUrl: image.media.thumbnailUrl,
+        sortOrder: image.sortOrder,
+      })),
     };
   }
 
@@ -377,6 +461,7 @@ export class SpecialtyService {
     return {
       ...this.toPublicDto(record),
       mediaId: record.mediaId,
+      galleryMediaIds: record.galleryImages.map((image) => image.mediaId),
       isActive: record.isActive,
       version: record.version,
       createdAt: record.createdAt,
@@ -390,6 +475,50 @@ export class SpecialtyService {
     return Array.isArray(value)
       ? value.filter((item): item is string => typeof item === 'string')
       : [];
+  }
+
+  private resolveBuyPlaces(
+    dto: Pick<SpecialtyContentDto, 'buyPlaceDetails' | 'buyPlaces'>,
+    specialtyId: string,
+  ): SpecialtyBuyPlace[] {
+    let places: SpecialtyBuyPlace[];
+    if (dto.buyPlaceDetails) {
+      places = dto.buyPlaceDetails.map((place) => ({
+        id: place.id,
+        name: place.name,
+        address: place.address ?? '',
+        googleMapsUrl: place.googleMapsUrl ?? '',
+        phone: place.phone ?? '',
+        email: place.email ?? '',
+      }));
+      const ids = places.map((place) => place.id);
+      if (new Set(ids).size !== ids.length) {
+        throw new AppException(
+          ErrorCode.VALIDATION_ERROR,
+          'Danh sách địa điểm mua chứa ID trùng',
+        );
+      }
+    } else if (dto.buyPlaces) {
+      places = parseBuyPlaceDetails(dto.buyPlaces, specialtyId);
+    } else {
+      places = [];
+    }
+    return places;
+  }
+
+  private assertBuyPlacesForActive(
+    isActive: boolean,
+    places: SpecialtyBuyPlace[],
+  ): void {
+    if (!isActive) return;
+    for (const place of places) {
+      if (!place.googleMapsUrl.trim()) {
+        throw new AppException(
+          ErrorCode.VALIDATION_ERROR,
+          `Địa điểm mua "${place.name}" cần có link Google Maps trước khi hiển thị đặc sản này`,
+        );
+      }
+    }
   }
 
   private async validateMedia(

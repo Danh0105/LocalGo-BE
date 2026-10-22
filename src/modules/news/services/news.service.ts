@@ -4,6 +4,7 @@ import {
   Prisma,
   type Media,
   type NewsArticle,
+  type NewsArticleImage,
   type User,
 } from '../../../../generated/prisma';
 import { ErrorCode } from '../../../common/constants/error-codes.constant';
@@ -27,12 +28,17 @@ import { NEWS_CATEGORY_FROM_DB, NEWS_CATEGORY_TO_DB } from '../news.constants';
 
 type NewsArticleRecord = NewsArticle & {
   media: Media | null;
+  galleryImages: Array<NewsArticleImage & { media: Media }>;
   createdBy: Pick<User, 'displayName'> | null;
   updatedBy: Pick<User, 'displayName'> | null;
 };
 
 const includeNewsArticle = {
   media: true,
+  galleryImages: {
+    orderBy: [{ sortOrder: 'asc' as const }, { id: 'asc' as const }],
+    include: { media: true },
+  },
   createdBy: { select: { displayName: true } },
   updatedBy: { select: { displayName: true } },
 };
@@ -120,7 +126,15 @@ export class NewsService {
       select: { id: true },
     });
     if (duplicate) throw this.slugExists();
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds = dto.galleryMediaIds ?? [];
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.NEWS_ARTICLE,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_NEWS_ARTICLE_MEDIA,
+    });
 
     const record = await this.prisma.$transaction(async (tx) => {
       const created = await tx.newsArticle.create({
@@ -134,15 +148,32 @@ export class NewsService {
           content: dto.content,
           tags: dto.tags,
           relatedLinks: dto.relatedLinks,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           mediaId: dto.mediaId ?? null,
           imageAlt: dto.imageAlt,
           isActive: dto.isActive ?? true,
           createdById: actorId,
           updatedById: actorId,
+          ...(galleryMediaIds.length === 0
+            ? {}
+            : {
+                galleryImages: {
+                  create: galleryMediaIds.map((mediaId, index) => ({
+                    mediaId,
+                    sortOrder: index,
+                  })),
+                },
+              }),
         },
         include: includeNewsArticle,
       });
-      await this.claimMedia(tx, dto.mediaId, actorId, id);
+      await this.mediaService.claimContentImageSet(tx, {
+        mediaIds: [dto.mediaId, ...galleryMediaIds],
+        actorId,
+        resourceType: MediaResourceType.NEWS_ARTICLE,
+        resourceId: id,
+        errorCode: ErrorCode.INVALID_NEWS_ARTICLE_MEDIA,
+      });
       await tx.auditLog.create({
         data: {
           actorId,
@@ -163,9 +194,19 @@ export class NewsService {
     dto: UpdateNewsArticleDto,
   ): Promise<NewsArticleAdminResponseDto> {
     const current = await this.findOrThrow(id);
-    await this.validateMedia(dto.mediaId, actorId, id);
+    const galleryMediaIds =
+      dto.galleryMediaIds ??
+      current.galleryImages.map((image) => image.mediaId);
+    this.mediaService.assertDistinctContentImages(dto.mediaId, galleryMediaIds);
+    await this.mediaService.validateContentImageSet({
+      mediaIds: [dto.mediaId, ...galleryMediaIds],
+      actorId,
+      resourceType: MediaResourceType.NEWS_ARTICLE,
+      resourceId: id,
+      errorCode: ErrorCode.INVALID_NEWS_ARTICLE_MEDIA,
+    });
 
-    const { record, deletedMediaId } = await this.prisma.$transaction(
+    const { record, deletedMediaIds } = await this.prisma.$transaction(
       async (tx) => {
         const updated = await tx.newsArticle.updateMany({
           where: { id, version: dto.version },
@@ -178,6 +219,9 @@ export class NewsService {
             content: dto.content,
             tags: dto.tags,
             relatedLinks: dto.relatedLinks,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             mediaId: dto.mediaId ?? null,
             imageAlt: dto.imageAlt,
             ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }),
@@ -187,16 +231,38 @@ export class NewsService {
         });
         if (updated.count !== 1) throw await this.versionConflict(tx, id);
 
-        const deletedMediaId = await this.mediaService.releaseSingularMedia(
+        if (dto.galleryMediaIds !== undefined) {
+          await tx.newsArticleImage.deleteMany({
+            where: { newsArticleId: id },
+          });
+          if (galleryMediaIds.length > 0)
+            await tx.newsArticleImage.createMany({
+              data: galleryMediaIds.map((mediaId, index) => ({
+                newsArticleId: id,
+                mediaId,
+                sortOrder: index,
+              })),
+            });
+        }
+        await this.mediaService.claimContentImageSet(tx, {
+          mediaIds: [dto.mediaId, ...galleryMediaIds],
+          actorId,
+          resourceType: MediaResourceType.NEWS_ARTICLE,
+          resourceId: id,
+          errorCode: ErrorCode.INVALID_NEWS_ARTICLE_MEDIA,
+        });
+        const deletedMediaIds = await this.mediaService.releaseContentImageSet(
           tx,
           {
-            previousMediaId: current.mediaId,
-            nextMediaId: dto.mediaId ?? null,
+            previousMediaIds: [
+              current.mediaId,
+              ...current.galleryImages.map((image) => image.mediaId),
+            ],
+            nextMediaIds: [dto.mediaId, ...galleryMediaIds],
             resourceType: MediaResourceType.NEWS_ARTICLE,
             resourceId: id,
           },
         );
-        await this.claimMedia(tx, dto.mediaId, actorId, id);
         await tx.auditLog.create({
           data: {
             actorId,
@@ -211,10 +277,10 @@ export class NewsService {
           where: { id },
           include: includeNewsArticle,
         });
-        return { record, deletedMediaId };
+        return { record, deletedMediaIds };
       },
     );
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
     return this.toAdminDto(record);
   }
 
@@ -252,14 +318,20 @@ export class NewsService {
 
   async remove(actorId: string, id: string): Promise<void> {
     const current = await this.findOrThrow(id);
-    const deletedMediaId = await this.prisma.$transaction(async (tx) => {
+    const deletedMediaIds = await this.prisma.$transaction(async (tx) => {
       await tx.newsArticle.delete({ where: { id } });
-      const deletedMediaId = await this.mediaService.releaseSingularMedia(tx, {
-        previousMediaId: current.mediaId,
-        nextMediaId: null,
-        resourceType: MediaResourceType.NEWS_ARTICLE,
-        resourceId: id,
-      });
+      const deletedMediaIds = await this.mediaService.releaseContentImageSet(
+        tx,
+        {
+          previousMediaIds: [
+            current.mediaId,
+            ...current.galleryImages.map((image) => image.mediaId),
+          ],
+          nextMediaIds: [],
+          resourceType: MediaResourceType.NEWS_ARTICLE,
+          resourceId: id,
+        },
+      );
       await tx.auditLog.create({
         data: {
           actorId,
@@ -268,9 +340,9 @@ export class NewsService {
           resourceId: id,
         },
       });
-      return deletedMediaId;
+      return deletedMediaIds;
     });
-    await this.mediaService.purgeStorage([deletedMediaId]);
+    await this.mediaService.purgeStorage(deletedMediaIds);
   }
 
   private async findOrThrow(id: string): Promise<NewsArticleRecord> {
@@ -290,6 +362,7 @@ export class NewsService {
       publishedAt: record.publishedAt,
       author: record.author,
       summary: record.summary,
+      googleMapsUrl: record.googleMapsUrl,
       imageUrl: record.media?.originalUrl ?? null,
       imageAlt: record.imageAlt,
       updatedAt: record.updatedAt,
@@ -302,6 +375,12 @@ export class NewsService {
       content: this.readStringArray(record.content),
       tags: this.readStringArray(record.tags),
       relatedLinks: this.readStringArray(record.relatedLinks),
+      galleryImages: record.galleryImages.map((image) => ({
+        mediaId: image.mediaId,
+        imageUrl: image.media.originalUrl,
+        thumbnailUrl: image.media.thumbnailUrl,
+        sortOrder: image.sortOrder,
+      })),
     };
   }
 
@@ -309,6 +388,7 @@ export class NewsService {
     return {
       ...this.toPublicDto(record),
       mediaId: record.mediaId,
+      galleryMediaIds: record.galleryImages.map((image) => image.mediaId),
       isActive: record.isActive,
       version: record.version,
       createdAt: record.createdAt,
@@ -321,67 +401,6 @@ export class NewsService {
     return Array.isArray(value)
       ? value.filter((item): item is string => typeof item === 'string')
       : [];
-  }
-
-  private async validateMedia(
-    mediaId: string | null | undefined,
-    actorId: string,
-    newsArticleId: string,
-  ): Promise<void> {
-    if (!mediaId) return;
-    const media = await this.prisma.media.findFirst({
-      where: { id: mediaId, deletedAt: null },
-    });
-    const validImage = media?.mimeType.startsWith('image/');
-    const usable =
-      media &&
-      ((media.resourceType === null && media.ownerId === actorId) ||
-        (media.resourceType === MediaResourceType.NEWS_ARTICLE &&
-          (media.resourceId === newsArticleId || media.resourceId === null)));
-    if (!validImage || !usable) {
-      throw new AppException(
-        ErrorCode.INVALID_NEWS_ARTICLE_MEDIA,
-        'Ảnh không tồn tại hoặc không được phép sử dụng',
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-  }
-
-  private async claimMedia(
-    tx: Prisma.TransactionClient,
-    mediaId: string | null | undefined,
-    actorId: string,
-    newsArticleId: string,
-  ): Promise<void> {
-    if (!mediaId) return;
-    const claimed = await tx.media.updateMany({
-      where: {
-        id: mediaId,
-        ownerId: actorId,
-        resourceType: null,
-        deletedAt: null,
-      },
-      data: {
-        resourceType: MediaResourceType.NEWS_ARTICLE,
-        resourceId: newsArticleId,
-      },
-    });
-    if (claimed.count === 0) {
-      const existing = await tx.media.findFirst({
-        where: {
-          id: mediaId,
-          resourceType: MediaResourceType.NEWS_ARTICLE,
-          OR: [{ resourceId: newsArticleId }, { resourceId: null }],
-          deletedAt: null,
-        },
-      });
-      if (!existing)
-        throw new AppException(
-          ErrorCode.INVALID_NEWS_ARTICLE_MEDIA,
-          'Ảnh đã được nội dung khác sử dụng',
-          HttpStatus.CONFLICT,
-        );
-    }
   }
 
   private async versionConflict(

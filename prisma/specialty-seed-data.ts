@@ -1,5 +1,14 @@
 import { SpecialtyCategory } from '../generated/prisma';
 
+export interface SpecialtyBuyPlaceSeedItem {
+  id: string;
+  name: string;
+  address: string;
+  googleMapsUrl: string;
+  phone: string;
+  email: string;
+}
+
 export interface SpecialtySeedItem {
   id: string;
   name: string;
@@ -8,8 +17,17 @@ export interface SpecialtySeedItem {
   season: string;
   summary: string;
   description: string[];
-  buyPlaces: string[];
+  buyPlaces: SpecialtyBuyPlaceSeedItem[];
 }
+
+const buyPlace = (id: string, name: string): SpecialtyBuyPlaceSeedItem => ({
+  id,
+  name,
+  address: '',
+  googleMapsUrl: '',
+  phone: '',
+  email: '',
+});
 
 export const SPECIALTY_SEED_DATA: SpecialtySeedItem[] = [
   {
@@ -25,9 +43,12 @@ export const SPECIALTY_SEED_DATA: SpecialtySeedItem[] = [
       'Bánh ngon nhất khi cuốn với thịt heo luộc, rau rừng và chấm nước mắm pha — món ăn đã làm nên danh tiếng ẩm thực của vùng đất Tây Ninh.',
     ],
     buyPlaces: [
-      'Các lò bánh tráng ấp Thuận Bình',
-      'Chợ Truông Mít',
-      'Cửa hàng OCOP xã',
+      buyPlace(
+        'cac-lo-banh-trang-ap-thuan-binh',
+        'Các lò bánh tráng ấp Thuận Bình',
+      ),
+      buyPlace('cho-truong-mit', 'Chợ Truông Mít'),
+      buyPlace('cua-hang-ocop-xa', 'Cửa hàng OCOP xã'),
     ],
   },
   {
@@ -43,9 +64,9 @@ export const SPECIALTY_SEED_DATA: SpecialtySeedItem[] = [
       'Đây là món quà được du khách mua nhiều nhất khi ghé Tây Ninh: chấm trái cây, ăn với bánh tráng hay nêm nếm món ăn đều hợp.',
     ],
     buyPlaces: [
-      'Cơ sở muối tôm ấp Lộc Trung',
-      'Chợ Truông Mít',
-      'Cửa hàng OCOP xã',
+      buyPlace('co-so-muoi-tom-ap-loc-trung', 'Cơ sở muối tôm ấp Lộc Trung'),
+      buyPlace('cho-truong-mit', 'Chợ Truông Mít'),
+      buyPlace('cua-hang-ocop-xa', 'Cửa hàng OCOP xã'),
     ],
   },
   {
@@ -61,9 +82,9 @@ export const SPECIALTY_SEED_DATA: SpecialtySeedItem[] = [
       'Nhiều nhà vườn trong xã đang canh tác theo chuẩn VietGAP, cho trái quanh năm nhờ kỹ thuật xử lý ra hoa, nhưng vụ chính vẫn ngon và rẻ nhất.',
     ],
     buyPlaces: [
-      'Nhà vườn ấp Thuận An',
-      'Chợ Truông Mít',
-      'Sạp trái cây dọc tỉnh lộ 784',
+      buyPlace('nha-vuon-ap-thuan-an', 'Nhà vườn ấp Thuận An'),
+      buyPlace('cho-truong-mit', 'Chợ Truông Mít'),
+      buyPlace('sap-trai-cay-doc-tinh-lo-784', 'Sạp trái cây dọc tỉnh lộ 784'),
     ],
   },
   {
@@ -79,9 +100,9 @@ export const SPECIALTY_SEED_DATA: SpecialtySeedItem[] = [
       'Sầu riêng ở đây được để chín rụng tự nhiên nên cơm vàng óng, béo ngọt và thơm lâu — mua tại vườn còn được chủ vườn đích thân chọn trái.',
     ],
     buyPlaces: [
-      'Vườn trái cây Thuận Bình',
-      'Chợ Truông Mít (vào vụ)',
-      'Đặt qua mục Liên hệ của Mini App',
+      buyPlace('vuon-trai-cay-thuan-binh', 'Vườn trái cây Thuận Bình'),
+      buyPlace('cho-truong-mit-vao-vu', 'Chợ Truông Mít (vào vụ)'),
+      buyPlace('lien-he-qua-mini-app', 'Đặt qua mục Liên hệ của Mini App'),
     ],
   },
   {
@@ -96,7 +117,13 @@ export const SPECIALTY_SEED_DATA: SpecialtySeedItem[] = [
       'Bò tơ được chăn thả tự nhiên trên các đồng cỏ ven hồ Dầu Tiếng nên thịt mềm, ngọt và ít mỡ. Bò tơ nướng mọi giữ trọn vị ngọt nguyên bản của thịt.',
       'Thịt nướng chín tới được cuốn cùng bánh tráng phơi sương, rau rừng và chấm mắm nêm — bộ ba đặc sản hội tụ trong một món ăn.',
     ],
-    buyPlaces: ['Các quán bò tơ dọc tỉnh lộ 784', 'Quán ăn khu trung tâm xã'],
+    buyPlaces: [
+      buyPlace(
+        'cac-quan-bo-to-doc-tinh-lo-784',
+        'Các quán bò tơ dọc tỉnh lộ 784',
+      ),
+      buyPlace('quan-an-khu-trung-tam-xa', 'Quán ăn khu trung tâm xã'),
+    ],
   },
   {
     id: 'nem-buoi',
@@ -111,9 +138,9 @@ export const SPECIALTY_SEED_DATA: SpecialtySeedItem[] = [
       'Nem có vị chua dịu, cay nồng, giòn sật lạ miệng, để được cả tuần — rất được ưa chuộng làm quà biếu.',
     ],
     buyPlaces: [
-      'Cơ sở nem bưởi ấp Thuận Hòa',
-      'Chợ Truông Mít',
-      'Cửa hàng OCOP xã',
+      buyPlace('co-so-nem-buoi-ap-thuan-hoa', 'Cơ sở nem bưởi ấp Thuận Hòa'),
+      buyPlace('cho-truong-mit', 'Chợ Truông Mít'),
+      buyPlace('cua-hang-ocop-xa', 'Cửa hàng OCOP xã'),
     ],
   },
 ];

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { ExperienceTourCategoryLabel } from '../experience-tour.constants';
+import { GalleryImageResponseDto } from '../../media/dto/gallery-image-response.dto';
 
 export class ExperienceTourListItemResponseDto {
   @ApiProperty()
@@ -24,6 +25,9 @@ export class ExperienceTourListItemResponseDto {
 
   @ApiProperty()
   meetingPoint: string;
+
+  @ApiProperty({ example: 'https://maps.app.goo.gl/example' })
+  googleMapsUrl: string;
 
   @ApiProperty()
   summary: string;
@@ -59,11 +63,17 @@ export class ExperienceTourResponseDto extends ExperienceTourListItemResponseDto
 
   @ApiPropertyOptional({ nullable: true, example: '0900 123 456' })
   contactPhone: string | null;
+
+  @ApiProperty({ type: [GalleryImageResponseDto] })
+  galleryImages: GalleryImageResponseDto[];
 }
 
 export class ExperienceTourAdminResponseDto extends ExperienceTourResponseDto {
   @ApiPropertyOptional({ nullable: true })
   mediaId: string | null;
+
+  @ApiProperty({ type: [String] })
+  galleryMediaIds: string[];
 
   @ApiProperty()
   isActive: boolean;

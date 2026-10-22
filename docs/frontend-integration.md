@@ -21,7 +21,11 @@ Mọi response thành công có dạng:
 `meta` chỉ xuất hiện ở API danh sách (phân trang). Response lỗi:
 
 ```json
-{ "success": false, "error": { "code": "VALIDATION_ERROR", "message": "...", "details": [] }, "requestId": "uuid" }
+{
+  "success": false,
+  "error": { "code": "VALIDATION_ERROR", "message": "...", "details": [] },
+  "requestId": "uuid"
+}
 ```
 
 Frontend nên tạo một API client dùng chung, tự động unwrap `data`/`meta` và ném lỗi có `code` để xử lý theo từng trường hợp (ví dụ hiển thị thông báo khác nhau cho `ACCOUNT_BLOCKED` so với `VALIDATION_ERROR`).
@@ -73,6 +77,7 @@ Xem bảng chi tiết trong `docs/frontend-backend-mapping.md`. Điểm cần l�
 - `id` chuyển từ `number` sang UUID `string` — bỏ mọi `Number(id)`.
 - Thêm `slug` — nên dùng `slug` cho URL đẹp (`/trade/:slug`) thay vì id.
 - `owner` (string) → cần đăng nhập thật, lấy tên qua `contactName` hoặc thông tin user hiện tại.
+- `googleMapsUrl` (`string | null`) → hiện nút "Mở Google Maps" khi có giá trị; dùng link backend trả về, không tự ghép từ địa chỉ.
 - `price` (string tự do) → tách thành `price` (số, chỉ có khi `priceType=FIXED`) + `priceLabel` (chuỗi hiển thị, luôn có).
 - `rating`/`reviewCount` → `averageRating`/`reviewCount`, backend tự tính, không gửi lên khi tạo/sửa tin.
 - `badge` → `featured` (boolean, chỉ admin/moderator đặt được qua `/admin/trade-posts/:id/feature`).
@@ -84,8 +89,10 @@ Xem bảng chi tiết trong `docs/frontend-backend-mapping.md`. Điểm cần l�
 3. Thay `src/pages/trade.tsx`: gọi `GET /trade-posts` thay vì import mảng mock; map field theo bảng ở mục 7.
 4. Thay `src/pages/trade-detail.tsx`: gọi `GET /trade-posts/:slug`.
 5. Nối nút "Đăng tin": form → `POST /media/images` (nếu có ảnh) → `POST /trade-posts` → `PATCH /trade-posts/:id/submit`.
+   - Đánh dấu `*` và chặn submit khi thiếu: `category`, `title`, `summary`, `description`, `address`, `contactName`, `contactPhone`; thêm `priceType` khi chọn `COMMERCIAL`.
+   - Thêm ô tùy chọn "Link Google Maps" gửi bằng `googleMapsUrl`; cho phép xóa bằng `null` khi sửa.
 6. Nối form review trong `trade-detail.tsx`: `POST /media/images` (nếu có ảnh, tối đa 3) → `POST /trade-posts/:tradePostId/reviews`.
-7. Hiển thị `GET /trade-posts/:tradePostId/reviews` (đã duyệt) và `GET .../reviews/summary` (biểu đồ phân bố sao) thay cho 2 review hardcode.
+7. Hiển thị `GET /trade-posts/:tradePostId/reviews` (đánh giá hiển thị ngay khi gửi, không cần admin duyệt) và `GET .../reviews/summary` (biểu đồ phân bố sao) thay cho 2 review hardcode.
 8. Giữ nguyên mock data cho 14 domain nội dung khác — **chưa xóa** cho tới khi Phase 2 hoàn thành các module tương ứng.
 9. Sau khi xác minh toàn bộ luồng trade + review hoạt động đúng trên môi trường thật, mới xóa `src/pages/trade.tsx` mock array và mock review trong `trade-detail.tsx`.
 

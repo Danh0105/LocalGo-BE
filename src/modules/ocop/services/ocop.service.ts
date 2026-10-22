@@ -137,6 +137,7 @@ export class OcopService {
           rating: OCOP_RATING_TO_DB[dto.rating],
           producer: dto.producer,
           address: dto.address,
+          googleMapsUrl: dto.googleMapsUrl ?? '',
           priceRange: dto.priceRange,
           summary: dto.summary,
           description: dto.description,
@@ -185,6 +186,9 @@ export class OcopService {
             rating: OCOP_RATING_TO_DB[dto.rating],
             producer: dto.producer,
             address: dto.address,
+            ...(dto.googleMapsUrl === undefined
+              ? {}
+              : { googleMapsUrl: dto.googleMapsUrl }),
             priceRange: dto.priceRange,
             summary: dto.summary,
             description: dto.description,
@@ -355,6 +359,7 @@ export class OcopService {
       rating: OCOP_RATING_FROM_DB[record.rating],
       producer: record.producer,
       address: record.address,
+      googleMapsUrl: record.googleMapsUrl,
       priceRange: record.priceRange,
       summary: record.summary,
       imageUrl: record.media?.originalUrl ?? null,
